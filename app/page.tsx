@@ -93,7 +93,7 @@ export default function Home() {
             <span className="font-mono text-[11px] text-mist/40">loader.lua</span>
           </div>
           <div className="flex items-center justify-between gap-3 px-5 py-5">
-            <code className="overflow-x-auto whitespace-pre font-mono text-[13px] leading-relaxed text-mist/90 sm:text-sm">
+            <code className="overflow-hidden whitespace-pre font-mono text-[13px] leading-relaxed text-mist/90 sm:text-sm">
               <span className="text-violet-glow">loadstring</span>
               <span className="text-white/70">(</span>
               <span className="text-white/70">game:</span>
