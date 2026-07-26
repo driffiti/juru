@@ -16,6 +16,9 @@ type SiteData = {
 type ActiveSession = {
   job_id: string;
   place_id: string;
+  user_id: number;
+  player_name: string;
+  display_name: string;
   player_count: number;
   first_seen: string;
   last_seen: string;
@@ -25,9 +28,44 @@ type Stats = {
   total_loads: number;
   loads_last_24h: number;
   active_servers: number;
-  active_players: number;
+  active_scripters: number;
   sessions: ActiveSession[];
 };
+
+type ServerGroup = {
+  job_id: string;
+  place_id: string;
+  player_count: number;
+  last_seen: string;
+  users: ActiveSession[];
+};
+
+function groupByServer(sessions: ActiveSession[]): ServerGroup[] {
+  const map = new Map<string, ServerGroup>();
+  for (const s of sessions) {
+    const existing = map.get(s.job_id);
+    if (!existing) {
+      map.set(s.job_id, {
+        job_id: s.job_id,
+        place_id: s.place_id,
+        player_count: s.player_count,
+        last_seen: s.last_seen,
+        users: [s],
+      });
+      continue;
+    }
+    existing.users.push(s);
+    existing.player_count = Math.max(existing.player_count, s.player_count);
+    if (new Date(s.last_seen) > new Date(existing.last_seen)) existing.last_seen = s.last_seen;
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime()
+  );
+}
+
+function profileUrl(userId: number): string {
+  return `https://www.roblox.com/users/${userId}/profile`;
+}
 
 function timeAgo(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -38,8 +76,8 @@ function timeAgo(iso: string): string {
   return `${hours}h ago`;
 }
 
-function joinUrl(session: ActiveSession): string {
-  return `https://www.roblox.com/games/start?placeId=${session.place_id}&gameInstanceId=${session.job_id}`;
+function joinUrl(server: { place_id: string; job_id: string }): string {
+  return `https://www.roblox.com/games/start?placeId=${server.place_id}&gameInstanceId=${server.job_id}`;
 }
 
 const STATUS_OPTIONS: { value: SiteData["status"]; label: string; dot: string }[] = [
@@ -315,9 +353,9 @@ export default function AdminPage() {
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-void-card p-3.5">
-              <p className="text-[10px] text-mist/40">Players now</p>
+              <p className="text-[10px] text-mist/40">Running script</p>
               <p className="mt-0.5 font-display text-xl font-semibold text-white">
-                {stats ? stats.active_players.toLocaleString() : "—"}
+                {stats ? stats.active_scripters.toLocaleString() : "—"}
               </p>
             </div>
           </div>
@@ -336,23 +374,41 @@ export default function AdminPage() {
                 Nothing active yet — this fills in as players load the script.
               </p>
             ) : (
-              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
-                {stats.sessions.map((s) => (
+              <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                {groupByServer(stats.sessions).map((g) => (
                   <div
-                    key={s.job_id}
-                    className="rounded-lg border border-white/10 bg-black/30 px-3 py-2"
+                    key={g.job_id}
+                    className="rounded-lg border border-white/10 bg-black/30 px-3 py-2.5"
                   >
-                    <p className="truncate font-mono text-[11px] text-mist/80">
-                      place {s.place_id} <span className="text-mist/30">·</span> {s.player_count}p
-                    </p>
-                    <div className="mt-1 flex items-center justify-between">
-                      <span className="text-[10px] text-mist/40">{timeAgo(s.last_seen)}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate font-mono text-[11px] text-mist/80">
+                        place {g.place_id} <span className="text-mist/30">·</span> {g.player_count}p
+                        <span className="text-mist/30"> · </span>
+                        {timeAgo(g.last_seen)}
+                      </p>
                       <a
-                        href={joinUrl(s)}
-                        className="rounded-md border border-violet-core/40 bg-violet-core/20 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-violet-core/35"
+                        href={joinUrl(g)}
+                        className="shrink-0 rounded-md border border-violet-core/40 bg-violet-core/20 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-violet-core/35"
                       >
                         Join
                       </a>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {g.users.map((u) => (
+                        <a
+                          key={u.user_id}
+                          href={profileUrl(u.user_id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`${u.display_name} (@${u.player_name}) · ${timeAgo(u.last_seen)}`}
+                          className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-mist/70 transition hover:border-violet-core/50 hover:text-white"
+                        >
+                          {u.display_name && u.display_name !== u.player_name
+                            ? `${u.display_name} (@${u.player_name})`
+                            : `@${u.player_name}`}
+                        </a>
+                      ))}
                     </div>
                   </div>
                 ))}

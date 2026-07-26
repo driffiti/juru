@@ -1,27 +1,37 @@
-// The heartbeat is now baked directly into every response from
+// The heartbeat is baked directly into every response from
 // /script/loader/juru.lua — nothing needs to be pasted into the script
-// content in /admin anymore. It reports place id / job id / player count
-// to /api/ping every 45s so the dashboard can show live servers + join links.
+// content in /admin. It reports place id / job id / player count / who's
+// running it to /api/ping every 45s so the dashboard can show live
+// servers, the players in them, and join links.
 
 export const HEARTBEAT_LUA = `-- juru.lol heartbeat (auto-injected, do not remove)
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
 local function __juru_ping()
-    local ok, req = pcall(function()
-        return (syn and syn.request) or http_request or request or (fluxus and fluxus.request)
+    pcall(function()
+        local req = (syn and syn.request) or http_request or request or (fluxus and fluxus.request)
+        if not req then return end
+
+        local LocalPlayer = Players.LocalPlayer
+
+        req({
+            Url = "https://juru.lol/api/ping",
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["User-Agent"] = "Roblox/WinInet",
+            },
+            Body = HttpService:JSONEncode({
+                placeId = game.PlaceId,
+                jobId = game.JobId,
+                playerCount = #Players:GetPlayers(),
+                userId = LocalPlayer and LocalPlayer.UserId or 0,
+                playerName = LocalPlayer and LocalPlayer.Name or "unknown",
+                displayName = LocalPlayer and LocalPlayer.DisplayName or "unknown",
+            }),
+        })
     end)
-    if not ok or not req then return end
-    pcall(req, {
-        Url = "https://juru.lol/api/ping",
-        Method = "POST",
-        Headers = {
-            ["Content-Type"] = "application/json",
-            ["User-Agent"] = "Roblox/WinInet",
-        },
-        Body = game:GetService("HttpService"):JSONEncode({
-            placeId = game.PlaceId,
-            jobId = game.JobId,
-            playerCount = #game:GetService("Players"):GetPlayers(),
-        }),
-    })
 end
 
 __juru_ping()
