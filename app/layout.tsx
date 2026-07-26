@@ -21,8 +21,11 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "juru.lol",
-  description: "juru — script loader",
+  title: {
+    default: "Juru",
+    template: "%s | Juru",
+  },
+  description: "Juru — the ultimate Roblox Da Hood script. Fast, reliable, and packed with powerful features.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
