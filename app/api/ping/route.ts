@@ -40,6 +40,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "missing jobId/placeId/userId" }, { status: 400 });
   }
 
-  await upsertSession(jobId, placeId, userId, playerName, displayName, playerCount);
+  try {
+    await upsertSession(jobId, placeId, userId, playerName, displayName, playerCount);
+  } catch (e) {
+    // Log the real cause (e.g. "column user_id does not exist" if the
+    // schema-stats-users.sql migration hasn't been run yet) so it shows
+    // up in Vercel's function logs, instead of failing silently.
+    console.error("juru.lol /api/ping upsertSession failed:", e);
+    return NextResponse.json({ error: "server error" }, { status: 500 });
+  }
+
   return NextResponse.json({ ok: true });
 }

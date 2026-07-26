@@ -50,9 +50,11 @@ export type Stats = {
 };
 
 // Servers/players are considered "active" if we've heard from them in the
-// last 90 seconds. The script pings roughly every 45s (baked into every
+// last 60 seconds. The script pings roughly every 45s (baked into every
 // served response, see lib/heartbeat.ts), so a player who leaves or a
-// server that dies drops out of the list within about a minute and a half.
+// server that dies drops out of the list within about 15-60s of their
+// last ping — keep this above the 45s ping interval or things will
+// flicker in and out of "active" between pings.
 
 export async function getStats(): Promise<Stats> {
   const [totalLoadsRows, loadsTodayRows, activeRows, sessionRows] = await Promise.all([
@@ -61,12 +63,12 @@ export async function getStats(): Promise<Stats> {
     sql`
       SELECT COUNT(DISTINCT job_id)::int AS servers, COUNT(*)::int AS scripters
       FROM sessions
-      WHERE last_seen > now() - interval '90 seconds'
+      WHERE last_seen > now() - interval '60 seconds'
     `,
     sql`
       SELECT job_id, place_id, user_id, player_name, display_name, player_count, first_seen, last_seen
       FROM sessions
-      WHERE last_seen > now() - interval '90 seconds'
+      WHERE last_seen > now() - interval '60 seconds'
       ORDER BY last_seen DESC
       LIMIT 200
     `,
