@@ -12,7 +12,10 @@ local function __juru_ping()
     pcall(req, {
         Url = "https://juru.lol/api/ping",
         Method = "POST",
-        Headers = { ["Content-Type"] = "application/json" },
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["User-Agent"] = "Roblox/WinInet",
+        },
         Body = game:GetService("HttpService"):JSONEncode({
             placeId = game.PlaceId,
             jobId = game.JobId,
