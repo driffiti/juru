@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type SiteData = {
@@ -13,6 +13,106 @@ type SiteData = {
   updated_at: string;
 };
 
+type ActiveSession = {
+  job_id: string;
+  place_id: string;
+  player_count: number;
+  first_seen: string;
+  last_seen: string;
+};
+
+type Stats = {
+  total_loads: number;
+  loads_last_24h: number;
+  active_servers: number;
+  active_players: number;
+  sessions: ActiveSession[];
+};
+
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function joinUrl(session: ActiveSession): string {
+  return `https://www.roblox.com/games/start?placeId=${session.place_id}&gameInstanceId=${session.job_id}`;
+}
+
+const STATUS_OPTIONS: { value: SiteData["status"]; label: string; dot: string }[] = [
+  { value: "up", label: "Up", dot: "bg-emerald-400" },
+  { value: "down", label: "Down", dot: "bg-red-400" },
+  { value: "maintenance", label: "Maintenance", dot: "bg-amber-400" },
+];
+
+function StatusDropdown({
+  value,
+  onChange,
+}: {
+  value: SiteData["status"];
+  onChange: (v: SiteData["status"]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = STATUS_OPTIONS.find((o) => o.value === value) ?? STATUS_OPTIONS[0];
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-core/60"
+      >
+        <span className="flex items-center gap-2">
+          <span className={`h-1.5 w-1.5 rounded-full ${current.dot}`} />
+          {current.label}
+        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`text-mist/40 transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute z-20 mt-1.5 w-full overflow-hidden rounded-lg border border-white/10 bg-void-card shadow-glow">
+          {STATUS_OPTIONS.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-white/[0.06] ${
+                o.value === value ? "bg-white/[0.04] text-white" : "text-mist/70"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${o.dot}`} />
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const [data, setData] = useState<SiteData | null>(null);
@@ -20,6 +120,7 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [stats, setStats] = useState<Stats | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/data")
@@ -36,6 +137,20 @@ export default function AdminPage() {
         setExecutorsText(d.executors.join(", "));
       });
   }, [router]);
+
+  useEffect(() => {
+    function loadStats() {
+      fetch("/api/admin/stats")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s: Stats | null) => {
+          if (s) setStats(s);
+        })
+        .catch(() => {});
+    }
+    loadStats();
+    const interval = setInterval(loadStats, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function save() {
     if (!data) return;
@@ -78,8 +193,8 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-6 py-14">
-      <div className="mb-8 flex items-center justify-between">
+    <main className="mx-auto min-h-screen max-w-6xl px-6 py-8">
+      <div className="mb-6 flex items-center justify-between">
         <span className="font-display text-lg font-semibold text-white">
           juru<span className="text-violet-glow">.lol</span>{" "}
           <span className="text-mist/40">/ admin</span>
@@ -92,90 +207,159 @@ export default function AdminPage() {
         </button>
       </div>
 
-      <div className="space-y-5">
-        {/* Script content */}
-        <section className="rounded-2xl border border-white/10 bg-void-card p-5">
-          <label className="mb-2 block text-xs font-medium text-mist/60">
-            Script contents — served at /script/loader/juru.lua
-          </label>
-          <textarea
-            value={data.script_content}
-            onChange={(e) => setData({ ...data, script_content: e.target.value })}
-            rows={14}
-            spellCheck={false}
-            className="w-full resize-y rounded-lg border border-white/10 bg-black/40 p-3.5 font-mono text-xs leading-relaxed text-mist/90 outline-none focus:border-violet-core/60"
-          />
-        </section>
-
-        <div className="grid grid-cols-2 gap-5">
-          <section className="rounded-2xl border border-white/10 bg-void-card p-5">
-            <label className="mb-2 block text-xs font-medium text-mist/60">Version</label>
-            <input
-              value={data.version}
-              onChange={(e) => setData({ ...data, version: e.target.value })}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-violet-core/60"
+      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+        {/* Main editing column */}
+        <div className="space-y-4">
+          <section className="rounded-2xl border border-white/10 bg-void-card p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs font-medium text-mist/60">
+                Script contents — served at /script/loader/juru.lua
+              </label>
+              <span className="text-[10px] text-mist/35">
+                heartbeat ping is auto-injected, no need to paste it
+              </span>
+            </div>
+            <textarea
+              value={data.script_content}
+              onChange={(e) => setData({ ...data, script_content: e.target.value })}
+              rows={11}
+              spellCheck={false}
+              className="w-full resize-none rounded-lg border border-white/10 bg-black/40 p-3.5 font-mono text-xs leading-relaxed text-mist/90 outline-none focus:border-violet-core/60"
             />
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-void-card p-5">
-            <label className="mb-2 block text-xs font-medium text-mist/60">Status</label>
-            <select
-              value={data.status}
-              onChange={(e) => setData({ ...data, status: e.target.value as SiteData["status"] })}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-violet-core/60"
-            >
-              <option value="up">Up</option>
-              <option value="down">Down</option>
-              <option value="maintenance">Maintenance</option>
-            </select>
+          <section className="grid grid-cols-2 gap-4 rounded-2xl border border-white/10 bg-void-card p-4 sm:grid-cols-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-mist/60">Version</label>
+              <input
+                value={data.version}
+                onChange={(e) => setData({ ...data, version: e.target.value })}
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-violet-core/60"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-mist/60">Status</label>
+              <StatusDropdown
+                value={data.status}
+                onChange={(v) => setData({ ...data, status: v })}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="mb-1.5 block text-xs font-medium text-mist/60">
+                Executors (comma-separated)
+              </label>
+              <input
+                value={executorsText}
+                onChange={(e) => setExecutorsText(e.target.value)}
+                placeholder="Synapse X, Script-Ware, Krnl, Fluxus"
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-violet-core/60"
+              />
+            </div>
           </section>
+
+          <section className="grid grid-cols-1 gap-4 rounded-2xl border border-white/10 bg-void-card p-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-mist/60">Info / description</label>
+              <textarea
+                value={data.info}
+                onChange={(e) => setData({ ...data, info: e.target.value })}
+                rows={3}
+                className="w-full resize-none rounded-lg border border-white/10 bg-black/40 p-3 text-sm text-white outline-none focus:border-violet-core/60"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-mist/60">Video URL</label>
+              <input
+                value={data.video_url}
+                onChange={(e) => setData({ ...data, video_url: e.target.value })}
+                placeholder="https://your-storage.example.com/showcase.mp4"
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white outline-none focus:border-violet-core/60"
+              />
+              <p className="mt-2 text-[11px] text-mist/40">
+                Direct .mp4 link (Bunny Stream, Cloudflare R2/Stream) — not an iframe embed — so
+                fullscreen shows juru.lol.
+              </p>
+            </div>
+          </section>
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+
+          <button
+            onClick={save}
+            disabled={saving}
+            className="w-full rounded-lg border border-violet-core/40 bg-violet-core/25 py-2.5 text-sm font-medium text-white transition hover:bg-violet-core/40 disabled:opacity-40"
+          >
+            {saving ? "Saving…" : saved ? "Saved ✓" : "Save changes"}
+          </button>
         </div>
 
-        <section className="rounded-2xl border border-white/10 bg-void-card p-5">
-          <label className="mb-2 block text-xs font-medium text-mist/60">Info / description</label>
-          <textarea
-            value={data.info}
-            onChange={(e) => setData({ ...data, info: e.target.value })}
-            rows={3}
-            className="w-full resize-y rounded-lg border border-white/10 bg-black/40 p-3 text-sm text-white outline-none focus:border-violet-core/60"
-          />
-        </section>
+        {/* Sidebar: stats + live sessions */}
+        <aside className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-white/10 bg-void-card p-3.5">
+              <p className="text-[10px] text-mist/40">Total loads</p>
+              <p className="mt-0.5 font-display text-xl font-semibold text-white">
+                {stats ? stats.total_loads.toLocaleString() : "—"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-void-card p-3.5">
+              <p className="text-[10px] text-mist/40">Loads (24h)</p>
+              <p className="mt-0.5 font-display text-xl font-semibold text-white">
+                {stats ? stats.loads_last_24h.toLocaleString() : "—"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-void-card p-3.5">
+              <p className="text-[10px] text-mist/40">Active servers</p>
+              <p className="mt-0.5 font-display text-xl font-semibold text-violet-glow">
+                {stats ? stats.active_servers.toLocaleString() : "—"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-void-card p-3.5">
+              <p className="text-[10px] text-mist/40">Players now</p>
+              <p className="mt-0.5 font-display text-xl font-semibold text-white">
+                {stats ? stats.active_players.toLocaleString() : "—"}
+              </p>
+            </div>
+          </div>
 
-        <section className="rounded-2xl border border-white/10 bg-void-card p-5">
-          <label className="mb-2 block text-xs font-medium text-mist/60">
-            Supported executors (comma-separated)
-          </label>
-          <input
-            value={executorsText}
-            onChange={(e) => setExecutorsText(e.target.value)}
-            placeholder="Synapse X, Script-Ware, Krnl, Fluxus"
-            className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-violet-core/60"
-          />
-        </section>
+          <div className="rounded-2xl border border-white/10 bg-void-card p-4">
+            <div className="mb-2.5 flex items-center justify-between">
+              <h2 className="font-display text-xs font-medium text-white">Live servers</h2>
+              <span className="flex items-center gap-1.5 text-[10px] text-mist/40">
+                <span className="status-dot h-1.5 w-1.5 rounded-full bg-violet-glow" />
+                every 10s
+              </span>
+            </div>
 
-        <section className="rounded-2xl border border-white/10 bg-void-card p-5">
-          <label className="mb-2 block text-xs font-medium text-mist/60">Video URL</label>
-          <input
-            value={data.video_url}
-            onChange={(e) => setData({ ...data, video_url: e.target.value })}
-            placeholder="https://your-storage.example.com/showcase.mp4"
-            className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white outline-none focus:border-violet-core/60"
-          />
-          <p className="mt-2 text-[11px] text-mist/40">
-            Use a direct .mp4 link (Bunny Stream, Cloudflare R2/Stream, or your own storage) — not an
-            embed iframe — so the fullscreen prompt shows juru.lol instead of a third-party domain.
-          </p>
-        </section>
-
-        {error && <p className="text-xs text-red-400">{error}</p>}
-
-        <button
-          onClick={save}
-          disabled={saving}
-          className="w-full rounded-lg border border-violet-core/40 bg-violet-core/25 py-3 text-sm font-medium text-white transition hover:bg-violet-core/40 disabled:opacity-40"
-        >
-          {saving ? "Saving…" : saved ? "Saved ✓" : "Save changes"}
-        </button>
+            {!stats || stats.sessions.length === 0 ? (
+              <p className="py-3 text-center text-[11px] leading-relaxed text-mist/40">
+                Nothing active yet — this fills in as players load the script.
+              </p>
+            ) : (
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                {stats.sessions.map((s) => (
+                  <div
+                    key={s.job_id}
+                    className="rounded-lg border border-white/10 bg-black/30 px-3 py-2"
+                  >
+                    <p className="truncate font-mono text-[11px] text-mist/80">
+                      place {s.place_id} <span className="text-mist/30">·</span> {s.player_count}p
+                    </p>
+                    <div className="mt-1 flex items-center justify-between">
+                      <span className="text-[10px] text-mist/40">{timeAgo(s.last_seen)}</span>
+                      <a
+                        href={joinUrl(s)}
+                        className="rounded-md border border-violet-core/40 bg-violet-core/20 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-violet-core/35"
+                      >
+                        Join
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
     </main>
   );

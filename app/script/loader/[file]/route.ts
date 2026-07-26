@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSiteData } from "@/lib/db";
+import { isRobloxClient } from "@/lib/roblox";
+import { recordLoad } from "@/lib/stats";
+import { buildServedScript } from "@/lib/heartbeat";
 
 export const revalidate = 0;
-
-// Roblox's HttpService (and every executor's HttpGet) sends a User-Agent
-// that contains "Roblox". A normal desktop/mobile browser never does, so
-// this is a simple, effective gate that keeps casual visitors from being
-// able to open the raw script in a tab while costing Roblox clients nothing.
-function isRobloxClient(userAgent: string | null): boolean {
-  if (!userAgent) return false;
-  return /roblox/i.test(userAgent);
-}
 
 export async function GET(req: NextRequest, { params }: { params: { file: string } }) {
   const userAgent = req.headers.get("user-agent");
@@ -27,6 +21,10 @@ export async function GET(req: NextRequest, { params }: { params: { file: string
   try {
     const data = await getSiteData();
 
+    // Fire-and-forget: log the load for stats without slowing the response.
+    // If this fails (e.g. DB hiccup) it should never block the script.
+    recordLoad().catch(() => {});
+
     if (data.status === "down") {
       return new NextResponse(
         `error("juru.lol is currently down. status: ${data.status}")`,
@@ -34,7 +32,12 @@ export async function GET(req: NextRequest, { params }: { params: { file: string
       );
     }
 
-    return new NextResponse(data.script_content, {
+    // The heartbeat (place/job id + player count ping, used to power the
+    // "servers running the script" list in /admin) is baked in here, so
+    // the admin never has to remember to include it in the script content.
+    const served = buildServedScript(data.script_content);
+
+    return new NextResponse(served, {
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
