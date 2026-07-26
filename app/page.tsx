@@ -51,12 +51,24 @@ export default function Home() {
         <span className="font-display text-lg font-semibold tracking-tight text-white">
           juru<span className="text-violet-glow">.lol</span>
         </span>
-        <a
-          href="/login"
-          className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-xs font-medium text-mist/70 transition hover:border-violet-core/50 hover:text-white"
-        >
-          Admin
-        </a>
+
+        <div className="flex items-center gap-2">
+          <a
+            href="https://discord.gg/YOUR_INVITE"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-xs font-medium text-mist/70 transition hover:border-violet-core/50 hover:text-white"
+          >
+            Discord
+          </a>
+
+          <a
+            href="/login"
+            className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-xs font-medium text-mist/70 transition hover:border-violet-core/50 hover:text-white"
+          >
+            Admin
+          </a>
+        </div>
       </div>
 
       {/* Hero */}
