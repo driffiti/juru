@@ -54,7 +54,7 @@ export default function Home() {
 
         <div className="flex items-center gap-2">
           <a
-            href="https://discord.gg/YOUR_INVITE"
+            href="https://discord.gg/vd5smhB9cF"
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-xs font-medium text-mist/70 transition hover:border-violet-core/50 hover:text-white"
