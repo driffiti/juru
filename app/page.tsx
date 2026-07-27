@@ -135,8 +135,7 @@ export default function Home() {
         </div>
         {data?.require_key && (
           <p className="mt-2 px-1 text-[11px] text-mist/40">
-            Replace <span className="font-mono text-mist/60">YOUR-KEY-HERE</span> with the key you
-            were given — the script won&apos;t run without a valid one.
+            Join the <span className="font-mono text-mist/60">DISCORD</span> to buy a key — the script won&apos;t run without a valid one.
           </p>
         )}
       </div>
