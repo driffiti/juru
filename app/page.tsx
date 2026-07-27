@@ -8,10 +8,12 @@ type StatusPayload = {
   info: string;
   executors: string[];
   video_url: string;
+  require_key: boolean;
   updated_at: string;
 };
 
-const LOADSTRING = `loadstring(game:HttpGet("https://juru.lol/script/loader/juru.lua"))()`;
+const BASE_LOADSTRING = `loadstring(game:HttpGet("https://juru.lol/script/loader/juru.lua"))()`;
+const KEY_LINE = `SCRIPT_KEY = "YOUR-KEY-HERE"`;
 
 const STATUS_META: Record<StatusPayload["status"], { label: string; color: string; dot: string }> = {
   up: { label: "Operational", color: "text-emerald-400", dot: "bg-emerald-400" },
@@ -32,7 +34,8 @@ export default function Home() {
   }, []);
 
   function copyLoadstring() {
-    navigator.clipboard.writeText(LOADSTRING).then(() => {
+    const text = data?.require_key ? `${KEY_LINE}\n${BASE_LOADSTRING}` : BASE_LOADSTRING;
+    navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     });
@@ -106,6 +109,14 @@ export default function Home() {
           </div>
           <div className="flex items-center justify-between gap-3 px-5 py-5">
             <code className="overflow-hidden whitespace-pre font-mono text-[13px] leading-relaxed text-mist/90 sm:text-sm">
+              {data?.require_key && (
+                <>
+                  <span className="text-violet-glow">SCRIPT_KEY</span>
+                  <span className="text-white/70"> = </span>
+                  <span className="text-amber-300/90">&quot;YOUR-KEY-HERE&quot;</span>
+                  {"\n"}
+                </>
+              )}
               <span className="text-violet-glow">loadstring</span>
               <span className="text-white/70">(</span>
               <span className="text-white/70">game:</span>
@@ -122,6 +133,12 @@ export default function Home() {
             </button>
           </div>
         </div>
+        {data?.require_key && (
+          <p className="mt-2 px-1 text-[11px] text-mist/40">
+            Replace <span className="font-mono text-mist/60">YOUR-KEY-HERE</span> with the key you
+            were given — the script won&apos;t run without a valid one.
+          </p>
+        )}
       </div>
 
       {/* Info grid: executors + status */}

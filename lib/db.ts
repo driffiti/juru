@@ -13,6 +13,7 @@ export type SiteData = {
   info: string;
   executors: string[]; // e.g. ["Synapse X", "Script-Ware", "Krnl"]
   video_url: string;
+  require_key: boolean;
   updated_at: string;
 };
 
@@ -29,6 +30,7 @@ export async function getSiteData(): Promise<SiteData> {
   return {
     ...row,
     executors: row.executors ?? [],
+    require_key: !!row.require_key,
   };
 }
 
@@ -36,7 +38,13 @@ export async function updateSiteData(
   patch: Partial<
     Pick<
       SiteData,
-      "script_content" | "version" | "status" | "info" | "executors" | "video_url"
+      | "script_content"
+      | "version"
+      | "status"
+      | "info"
+      | "executors"
+      | "video_url"
+      | "require_key"
     >
   >
 ): Promise<SiteData> {
@@ -52,12 +60,13 @@ export async function updateSiteData(
       info = ${next.info},
       executors = ${JSON.stringify(next.executors)}::jsonb,
       video_url = ${next.video_url},
+      require_key = ${next.require_key},
       updated_at = now()
     WHERE id = ${ROW_ID}
     RETURNING *
   `;
   const row = rows[0] as any;
-  return { ...row, executors: row.executors ?? [] };
+  return { ...row, executors: row.executors ?? [], require_key: !!row.require_key };
 }
 
 export { sql };

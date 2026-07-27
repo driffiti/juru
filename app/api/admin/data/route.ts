@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
   if (typeof body.info === "string") patch.info = body.info;
   if (Array.isArray(body.executors)) patch.executors = body.executors.filter((e: unknown) => typeof e === "string");
   if (typeof body.video_url === "string") patch.video_url = body.video_url;
+  if (typeof body.require_key === "boolean") patch.require_key = body.require_key;
 
   const updated = await updateSiteData(patch as any);
   return NextResponse.json(updated);

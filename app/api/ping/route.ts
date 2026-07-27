@@ -6,7 +6,8 @@ export const revalidate = 0;
 
 // Called from *inside* the loaded script, roughly every 45s, so the
 // admin dashboard can show which servers currently have it running,
-// who's running it in each one, and let you jump straight into one.
+// who's running it (and with what executor) in each one, and let you
+// jump straight into one.
 export async function POST(req: NextRequest) {
   if (!isRobloxClient(req.headers.get("user-agent"))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -35,17 +36,17 @@ export async function POST(req: NextRequest) {
   const playerCount = Number.isFinite(body.playerCount)
     ? Math.max(0, Math.min(1000, Math.floor(body.playerCount)))
     : 0;
+  const executor = typeof body.executor === "string" ? body.executor.slice(0, 40) : "Unknown";
+  const executorVersion =
+    typeof body.executorVersion === "string" ? body.executorVersion.slice(0, 20) : "";
 
   if (!jobId || !placeId || userId === null) {
     return NextResponse.json({ error: "missing jobId/placeId/userId" }, { status: 400 });
   }
 
   try {
-    await upsertSession(jobId, placeId, userId, playerName, displayName, playerCount);
+    await upsertSession(jobId, placeId, userId, playerName, displayName, playerCount, executor, executorVersion);
   } catch (e) {
-    // Log the real cause (e.g. "column user_id does not exist" if the
-    // schema-stats-users.sql migration hasn't been run yet) so it shows
-    // up in Vercel's function logs, instead of failing silently.
     console.error("juru.lol /api/ping upsertSession failed:", e);
     return NextResponse.json({ error: "server error" }, { status: 500 });
   }

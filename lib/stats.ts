@@ -16,16 +16,20 @@ export async function upsertSession(
   userId: number,
   playerName: string,
   displayName: string,
-  playerCount: number
+  playerCount: number,
+  executor: string,
+  executorVersion: string
 ) {
   await sql`
-    INSERT INTO sessions (job_id, place_id, user_id, player_name, display_name, player_count, first_seen, last_seen)
-    VALUES (${jobId}, ${placeId}, ${userId}, ${playerName}, ${displayName}, ${playerCount}, now(), now())
+    INSERT INTO sessions (job_id, place_id, user_id, player_name, display_name, player_count, executor, executor_version, first_seen, last_seen)
+    VALUES (${jobId}, ${placeId}, ${userId}, ${playerName}, ${displayName}, ${playerCount}, ${executor}, ${executorVersion}, now(), now())
     ON CONFLICT (job_id, user_id) DO UPDATE SET
       place_id = EXCLUDED.place_id,
       player_name = EXCLUDED.player_name,
       display_name = EXCLUDED.display_name,
       player_count = EXCLUDED.player_count,
+      executor = EXCLUDED.executor,
+      executor_version = EXCLUDED.executor_version,
       last_seen = now()
   `;
 }
@@ -37,6 +41,8 @@ export type ActiveSession = {
   player_name: string;
   display_name: string;
   player_count: number;
+  executor: string;
+  executor_version: string;
   first_seen: string;
   last_seen: string;
 };
@@ -66,7 +72,7 @@ export async function getStats(): Promise<Stats> {
       WHERE last_seen > now() - interval '60 seconds'
     `,
     sql`
-      SELECT job_id, place_id, user_id, player_name, display_name, player_count, first_seen, last_seen
+      SELECT job_id, place_id, user_id, player_name, display_name, player_count, executor, executor_version, first_seen, last_seen
       FROM sessions
       WHERE last_seen > now() - interval '60 seconds'
       ORDER BY last_seen DESC

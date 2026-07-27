@@ -12,11 +12,12 @@ export async function GET() {
       info: data.info,
       executors: data.executors,
       video_url: data.video_url,
+      require_key: data.require_key,
       updated_at: data.updated_at,
     });
   } catch (e) {
     return NextResponse.json(
-      { version: "?", status: "down", info: "", executors: [], video_url: "" },
+      { version: "?", status: "down", info: "", executors: [], video_url: "", require_key: false },
       { status: 200 }
     );
   }
