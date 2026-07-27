@@ -11,7 +11,14 @@ type SiteData = {
   executors: string[];
   video_url: string;
   require_key: boolean;
+  test_key: string;
   updated_at: string;
+};
+
+type TestKeyUsage = {
+  hwid: string;
+  first_seen: string;
+  expired: boolean;
 };
 
 type ActiveSession = {
@@ -181,6 +188,10 @@ export default function AdminPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [stats, setStats] = useState<Stats | null>(null);
+  const [testKey, setTestKey] = useState<string>("");
+  const [testUsages, setTestUsages] = useState<TestKeyUsage[]>([]);
+  const [testKeyCopied, setTestKeyCopied] = useState(false);
+  const [testKeyBusy, setTestKeyBusy] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/data")
@@ -195,6 +206,7 @@ export default function AdminPage() {
         if (!d) return;
         setData(d);
         setExecutorsText(d.executors.join(", "));
+        setTestKey(d.test_key ?? "");
       });
   }, [router]);
 
@@ -211,6 +223,36 @@ export default function AdminPage() {
     const interval = setInterval(loadStats, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  function loadTestKey() {
+    fetch("/api/admin/testkey")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { test_key: string; usages: TestKeyUsage[] } | null) => {
+        if (!d) return;
+        setTestKey(d.test_key);
+        setTestUsages(d.usages);
+      });
+  }
+
+  useEffect(loadTestKey, []);
+
+  async function testKeyAction(action: string, hwid?: string) {
+    setTestKeyBusy(true);
+    await fetch("/api/admin/testkey", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, hwid }),
+    });
+    setTestKeyBusy(false);
+    loadTestKey();
+  }
+
+  function copyTestKey() {
+    navigator.clipboard.writeText(testKey).then(() => {
+      setTestKeyCopied(true);
+      setTimeout(() => setTestKeyCopied(false), 1500);
+    });
+  }
 
   async function save() {
     if (!data) return;
@@ -459,6 +501,81 @@ export default function AdminPage() {
                         </a>
                       ))}
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Test key panel */}
+          <div className="rounded-2xl border border-white/10 bg-void-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-display text-xs font-medium text-white">Test key</h2>
+              <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-400">
+                1h · one device
+              </span>
+            </div>
+
+            <div className="mb-3 flex items-center gap-2">
+              <code className="flex-1 truncate rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white">
+                {testKey || "—"}
+              </code>
+              <button
+                onClick={copyTestKey}
+                className="shrink-0 rounded-lg border border-violet-core/40 bg-violet-core/20 px-3 py-2 text-[11px] font-medium text-white transition hover:bg-violet-core/35"
+              >
+                {testKeyCopied ? "✓" : "Copy"}
+              </button>
+            </div>
+
+            <div className="mb-3 flex gap-2">
+              <button
+                onClick={() => testKeyAction("regenerate")}
+                disabled={testKeyBusy}
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] py-1.5 text-[11px] text-mist/70 transition hover:border-violet-core/50 hover:text-white disabled:opacity-40"
+              >
+                Regenerate
+              </button>
+              <button
+                onClick={() => { if (confirm("Clear all test key HWID records? Everyone gets a fresh hour.")) testKeyAction("clear-hwids"); }}
+                disabled={testKeyBusy}
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.03] py-1.5 text-[11px] text-mist/70 transition hover:border-red-400/50 hover:text-red-400 disabled:opacity-40"
+              >
+                Clear all HWIDs
+              </button>
+            </div>
+
+            {testUsages.length === 0 ? (
+              <p className="py-2 text-center text-[11px] text-mist/40">No usage yet.</p>
+            ) : (
+              <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                {testUsages.map((u) => (
+                  <div
+                    key={u.hwid}
+                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                      u.expired ? "border-red-400/20 bg-red-400/[0.03]" : "border-white/10 bg-black/30"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-[10px] text-mist/60">
+                        {u.hwid.length > 18 ? `${u.hwid.slice(0, 18)}…` : u.hwid}
+                      </p>
+                      <p className="text-[10px] text-mist/40">
+                        {u.expired ? (
+                          <span className="text-red-400/70">Expired</span>
+                        ) : (
+                          <span className="text-emerald-400/70">Active</span>
+                        )}
+                        {" · "}first used {timeAgo(u.first_seen)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => testKeyAction("remove-hwid", u.hwid)}
+                      disabled={testKeyBusy}
+                      className="shrink-0 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-mist/50 transition hover:border-red-400/50 hover:text-red-400 disabled:opacity-40"
+                    >
+                      Remove
+                    </button>
                   </div>
                 ))}
               </div>
