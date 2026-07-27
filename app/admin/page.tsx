@@ -10,6 +10,7 @@ type SiteData = {
   info: string;
   executors: string[];
   video_url: string;
+  require_key: boolean;
   updated_at: string;
 };
 
@@ -20,6 +21,7 @@ type ActiveSession = {
   player_name: string;
   display_name: string;
   player_count: number;
+  executor: string;
   first_seen: string;
   last_seen: string;
 };
@@ -148,6 +150,26 @@ function StatusDropdown({
         </div>
       )}
     </div>
+  );
+}
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+        checked ? "border-violet-core/60 bg-violet-core/60" : "border-white/10 bg-white/[0.06]"
+      }`}
+    >
+      <span
+        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+          checked ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
   );
 }
 
@@ -320,6 +342,29 @@ export default function AdminPage() {
             </div>
           </section>
 
+          <section className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-void-card p-4">
+            <div>
+              <p className="text-xs font-medium text-white">Require a key to run</p>
+              <p className="mt-0.5 text-[11px] text-mist/40">
+                Off — anyone with the loadstring can run the script. On — needs a valid,
+                HWID-locked key set as <code className="text-mist/60">SCRIPT_KEY</code> before the
+                loadstring.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <Toggle
+                checked={data.require_key}
+                onChange={(v) => setData({ ...data, require_key: v })}
+              />
+              <a
+                href="/admin/keys"
+                className="rounded-lg border border-violet-core/40 bg-violet-core/20 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-core/35"
+              >
+                Manage keys →
+              </a>
+            </div>
+          </section>
+
           {error && <p className="text-xs text-red-400">{error}</p>}
 
           <button
@@ -401,12 +446,16 @@ export default function AdminPage() {
                           href={profileUrl(u.user_id)}
                           target="_blank"
                           rel="noreferrer"
-                          title={`${u.display_name} (@${u.player_name}) · ${timeAgo(u.last_seen)}`}
-                          className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-mist/70 transition hover:border-violet-core/50 hover:text-white"
+                          title={`${u.display_name} (@${u.player_name}) · ${u.executor} · ${timeAgo(u.last_seen)}`}
+                          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-mist/70 transition hover:border-violet-core/50 hover:text-white"
                         >
-                          {u.display_name && u.display_name !== u.player_name
-                            ? `${u.display_name} (@${u.player_name})`
-                            : `@${u.player_name}`}
+                          <span>
+                            {u.display_name && u.display_name !== u.player_name
+                              ? `${u.display_name} (@${u.player_name})`
+                              : `@${u.player_name}`}
+                          </span>
+                          <span className="text-mist/30">·</span>
+                          <span className="text-violet-glow/80">{u.executor}</span>
                         </a>
                       ))}
                     </div>
