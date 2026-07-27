@@ -4,19 +4,25 @@ const TEST_KEY_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 export type TestKeyUsage = {
   hwid: string;
+  player_name: string;
+  display_name: string;
   first_seen: string;
   expired: boolean;
 };
 
 export async function verifyTestKey(
-  hwid: string
+  hwid: string,
+  playerName: string,
+  displayName: string
 ): Promise<{ valid: boolean; reason?: string }> {
-  // Check if this HWID has ever used the test key before.
   const rows = await sql`SELECT * FROM test_key_hwids WHERE hwid = ${hwid} LIMIT 1`;
 
   if (rows.length === 0) {
     // First time — record them and grant access.
-    await sql`INSERT INTO test_key_hwids (hwid, first_seen) VALUES (${hwid}, now())`;
+    await sql`
+      INSERT INTO test_key_hwids (hwid, player_name, display_name, first_seen)
+      VALUES (${hwid}, ${playerName}, ${displayName}, now())
+    `;
     return { valid: true };
   }
 
@@ -24,7 +30,6 @@ export async function verifyTestKey(
   const elapsed = Date.now() - firstSeen.getTime();
 
   if (elapsed > TEST_KEY_WINDOW_MS) {
-    // Hour is up — permanently blocked, even if the test key value changes.
     return { valid: false, reason: "Your test access has expired." };
   }
 
@@ -47,6 +52,8 @@ export async function listTestKeyUsages(): Promise<TestKeyUsage[]> {
   const rows = await sql`SELECT * FROM test_key_hwids ORDER BY first_seen DESC`;
   return (rows as any[]).map((r) => ({
     hwid: r.hwid,
+    player_name: r.player_name ?? "unknown",
+    display_name: r.display_name ?? "",
     first_seen: r.first_seen,
     expired: Date.now() - new Date(r.first_seen).getTime() > TEST_KEY_WINDOW_MS,
   }));

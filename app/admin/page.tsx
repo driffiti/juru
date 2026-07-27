@@ -17,6 +17,8 @@ type SiteData = {
 
 type TestKeyUsage = {
   hwid: string;
+  player_name: string;
+  display_name: string;
   first_seen: string;
   expired: boolean;
 };
@@ -557,7 +559,12 @@ export default function AdminPage() {
                     }`}
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-mono text-[10px] text-mist/60">
+                      <p className="truncate text-[11px] font-medium text-white">
+                        {u.display_name && u.display_name !== u.player_name
+                          ? `${u.display_name} (@${u.player_name})`
+                          : `@${u.player_name}`}
+                      </p>
+                      <p className="truncate font-mono text-[10px] text-mist/40">
                         {u.hwid.length > 18 ? `${u.hwid.slice(0, 18)}…` : u.hwid}
                       </p>
                       <p className="text-[10px] text-mist/40">

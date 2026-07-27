@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
   // The test key works regardless of whether the key toggle is on or off.
   if (data.test_key && key === data.test_key.toUpperCase()) {
     try {
-      const result = await verifyTestKey(hwid);
+      const playerName = typeof body.playerName === "string" ? body.playerName.slice(0, 40) : "unknown";
+      const displayName = typeof body.displayName === "string" ? body.displayName.slice(0, 40) : playerName;
+      const result = await verifyTestKey(hwid, playerName, displayName);
       if (!result.valid) {
         return NextResponse.json({ valid: false, reason: result.reason });
       }
