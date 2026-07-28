@@ -88,7 +88,7 @@ function timeAgo(iso: string): string {
 }
 
 function joinUrl(server: { place_id: string; job_id: string }): string {
-  return `https://www.roblox.com/games/start?placeId=${server.place_id}&gameInstanceId=${server.job_id}`;
+  return `roblox://experiences/start?placeId=${server.place_id}&gameInstanceId=${server.job_id}`;
 }
 
 const STATUS_OPTIONS: { value: SiteData["status"]; label: string; dot: string }[] = [

@@ -1,19 +1,11 @@
-// This is the entire body of what /script/loader/juru.lua serves — it
-// never contains your actual script text. It:
-//   1. Detects the executor (via identifyexecutor(), with fallbacks).
-//   2. Sends a heartbeat to /api/ping every ~45s (powers the "live
-//      servers" list + player/executor info in /admin).
-//   3. Reads a HWID from the executor, and the SCRIPT_KEY global (if the
-//      person set one before the loadstring line).
-//   4. POSTs those to /api/unlock. The server checks whether a key is
-//      even required right now, and if so, validates it — the real
-//      script content only ever comes back in *that* response. Someone
-//      curling /script/loader/juru.lua directly gets this bootstrap and
-//      nothing else.
-//   5. If invalid, shows a "juru.lol" notification in-game and stops.
-//      If valid, runs the real script via loadstring.
+// buildBootstrap(nonce) returns the full body of what /script/loader/juru.lua
+// serves. It embeds a server-signed, time-bound nonce that must be sent to
+// /api/unlock — preventing replay of a cached loader response.
 
-export const BOOTSTRAP_LUA = `-- juru.lol loader (auto-generated, do not edit)
+export function buildBootstrap(nonce: string): string {
+  return `-- juru.lol loader (auto-generated, do not edit)
+local __juru_nonce = "${nonce}"
+
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
@@ -71,7 +63,6 @@ end
 
 local __juru_exec_name, __juru_exec_version = __juru_identify_executor()
 
--- heartbeat: runs regardless of key status, powers the live-servers list
 local function __juru_ping()
     pcall(function()
         local req = __juru_request()
@@ -105,7 +96,6 @@ task.spawn(function()
     end
 end)
 
--- key check + fetch the real script
 local __juru_req = __juru_request()
 if not __juru_req then
     __juru_alert("Your executor doesn't support HTTP requests.")
@@ -125,6 +115,7 @@ local __juru_ok, __juru_res = pcall(__juru_req, {
     Body = HttpService:JSONEncode({
         key = __juru_key,
         hwid = __juru_hwid(),
+        nonce = __juru_nonce,
         placeId = game.PlaceId,
         jobId = game.JobId,
         userId = __juru_local_player and __juru_local_player.UserId or 0,
@@ -161,3 +152,4 @@ end)
 if not __juru_run_ok then
     __juru_alert("Script failed to run.")
 end`;
+}
