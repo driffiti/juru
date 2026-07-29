@@ -24,11 +24,11 @@ async function bucketSig(bucket: number): Promise<string> {
     new TextEncoder().encode(`nonce:${bucket}`)
   );
   // 16 hex chars (64 bits) — enough for our purposes.
-  return Buffer.from(sig).toString("hex").slice(0, 16);
+  return Buffer.from(sig).toString("hex").slice(0, 8);
 }
 
 export async function generateNonce(): Promise<string> {
-  const bucket = Math.floor(Date.now() / 30000);
+  const bucket = Math.floor(Date.now() / 5000);
   const sig = await bucketSig(bucket);
   return `${bucket}.${sig}`;
 }
@@ -41,7 +41,7 @@ export async function verifyNonce(nonce: string | undefined | null): Promise<boo
   const bucket = Number(bucketStr);
   if (!Number.isFinite(bucket)) return false;
 
-  const currentBucket = Math.floor(Date.now() / 30000);
+  const currentBucket = Math.floor(Date.now() / 5000);
   // Accept current bucket and the one before it (up to ~60s window).
   if (bucket !== currentBucket && bucket !== currentBucket - 1) return false;
 
