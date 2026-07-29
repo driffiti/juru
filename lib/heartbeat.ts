@@ -1,7 +1,3 @@
-// buildBootstrap(nonce) returns the full body of what /script/loader/juru.lua
-// serves. It embeds a server-signed, time-bound nonce that must be sent to
-// /api/unlock — preventing replay of a cached loader response.
-
 export function buildBootstrap(nonce: string): string {
   return `-- juru.lol loader (auto-generated, do not edit)
 local __juru_nonce = "${nonce}"
@@ -62,13 +58,17 @@ local function __juru_alert(msg)
 end
 
 local __juru_exec_name, __juru_exec_version = __juru_identify_executor()
+local __juru_key = (getgenv and getgenv().SCRIPT_KEY) or SCRIPT_KEY or ""
+local __juru_running = true
 
+-- Returns true if the server has requested a kick for this player.
 local function __juru_ping()
+    local kicked = false
     pcall(function()
         local req = __juru_request()
         if not req then return end
         local LocalPlayer = Players.LocalPlayer
-        req({
+        local res = req({
             Url = "https://juru.lol/api/ping",
             Method = "POST",
             Headers = {
@@ -84,25 +84,54 @@ local function __juru_ping()
                 displayName = LocalPlayer and LocalPlayer.DisplayName or "unknown",
                 executor = __juru_exec_name,
                 executorVersion = __juru_exec_version,
+                key = __juru_key,
             }),
         })
+        if res and res.Body then
+            local ok, decoded = pcall(function()
+                return HttpService:JSONDecode(res.Body)
+            end)
+            if ok and decoded and decoded.kick then
+                kicked = true
+            end
+        end
+    end)
+    return kicked
+end
+
+-- Fire the first ping immediately, then loop every 45s.
+-- If the server sets kick=true we stop the loop and kick the player.
+local function __juru_do_kick()
+    __juru_running = false
+    pcall(function()
+        local LocalPlayer = Players.LocalPlayer
+        if LocalPlayer then
+            LocalPlayer:Kick("You have been removed by the script owner.")
+        end
     end)
 end
 
-__juru_ping()
+if __juru_ping() then
+    __juru_do_kick()
+    return
+end
+
 task.spawn(function()
-    while task.wait(45) do
-        __juru_ping()
+    while __juru_running and task.wait(45) do
+        if __juru_ping() then
+            __juru_do_kick()
+            break
+        end
     end
 end)
 
+-- Key check + fetch the real script.
 local __juru_req = __juru_request()
 if not __juru_req then
     __juru_alert("Your executor doesn't support HTTP requests.")
     return
 end
 
-local __juru_key = (getgenv and getgenv().SCRIPT_KEY) or SCRIPT_KEY or ""
 local __juru_local_player = Players.LocalPlayer
 
 local __juru_ok, __juru_res = pcall(__juru_req, {
@@ -146,7 +175,13 @@ if not __juru_decoded.valid then
 end
 
 local __juru_run_ok, __juru_run_err = pcall(function()
-    loadstring(__juru_decoded.script)()
+    local __juru_fn = loadstring(__juru_decoded.script)
+    __juru_decoded.script = nil
+    __juru_decoded = nil
+    if newcclosure then
+        __juru_fn = newcclosure(__juru_fn)
+    end
+    __juru_fn()
 end)
 
 if not __juru_run_ok then

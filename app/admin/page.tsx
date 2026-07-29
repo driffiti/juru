@@ -31,6 +31,9 @@ type ActiveSession = {
   display_name: string;
   player_count: number;
   executor: string;
+  executor_version: string;
+  key_used: string;
+  kick_requested: boolean;
   first_seen: string;
   last_seen: string;
 };
@@ -288,6 +291,15 @@ export default function AdminPage() {
     router.push("/login");
   }
 
+  async function kickPlayer(jobId: string, userId: number) {
+    await fetch("/api/admin/kick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId, userId }),
+    });
+    // Stats will refresh on next poll — no need to force it immediately.
+  }
+
   if (!data) {
     return (
       <main className="flex min-h-screen items-center justify-center">
@@ -483,24 +495,46 @@ export default function AdminPage() {
                       </a>
                     </div>
 
-                    <div className="mt-2 flex flex-wrap gap-1.5">
+                    <div className="mt-2 space-y-1.5">
                       {g.users.map((u) => (
-                        <a
+                        <div
                           key={u.user_id}
-                          href={profileUrl(u.user_id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`${u.display_name} (@${u.player_name}) · ${u.executor} · ${timeAgo(u.last_seen)}`}
-                          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-mist/70 transition hover:border-violet-core/50 hover:text-white"
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${
+                            u.kick_requested
+                              ? "border-amber-400/30 bg-amber-400/[0.04]"
+                              : "border-white/10 bg-black/20"
+                          }`}
                         >
-                          <span>
-                            {u.display_name && u.display_name !== u.player_name
-                              ? `${u.display_name} (@${u.player_name})`
-                              : `@${u.player_name}`}
-                          </span>
-                          <span className="text-mist/30">·</span>
-                          <span className="text-violet-glow/80">{u.executor}</span>
-                        </a>
+                          <div className="min-w-0">
+                            <a
+                              href={profileUrl(u.user_id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate text-[11px] font-medium text-white hover:text-violet-glow"
+                            >
+                              {u.display_name && u.display_name !== u.player_name
+                                ? `${u.display_name} (@${u.player_name})`
+                                : `@${u.player_name}`}
+                            </a>
+                            <p className="flex flex-wrap gap-x-2 text-[10px] text-mist/40">
+                              <span className="text-violet-glow/70">{u.executor}{u.executor_version ? ` ${u.executor_version}` : ""}</span>
+                              {u.key_used && (
+                                <>
+                                  <span className="text-mist/20">·</span>
+                                  <span className="font-mono text-mist/50">{u.key_used}</span>
+                                </>
+                              )}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => kickPlayer(u.job_id, u.user_id)}
+                            disabled={u.kick_requested}
+                            title={u.kick_requested ? "Kick pending — fires on next heartbeat" : "Kick this player"}
+                            className="shrink-0 rounded-md border border-red-400/30 bg-red-400/10 px-2 py-1 text-[10px] font-medium text-red-400 transition hover:bg-red-400/20 disabled:cursor-default disabled:opacity-50"
+                          >
+                            {u.kick_requested ? "Pending…" : "Kick"}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
