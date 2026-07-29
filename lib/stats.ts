@@ -78,12 +78,12 @@ export async function getStats(): Promise<Stats> {
     sql`
       SELECT COUNT(DISTINCT job_id)::int AS servers, COUNT(*)::int AS scripters
       FROM sessions
-      WHERE last_seen > now() - interval '45 seconds'
+      WHERE last_seen > now() - interval '55 seconds'
     `,
     sql`
       SELECT job_id, place_id, user_id, player_name, display_name, player_count, executor, executor_version, key_used, kick_requested, first_seen, last_seen
       FROM sessions
-      WHERE last_seen > now() - interval '45 seconds'
+      WHERE last_seen > now() - interval '55 seconds'
       ORDER BY last_seen DESC
       LIMIT 200
     `,

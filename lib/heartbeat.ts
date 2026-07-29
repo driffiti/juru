@@ -117,7 +117,7 @@ if __juru_ping() then
 end
 
 task.spawn(function()
-    while __juru_running and task.wait(20) do
+    while __juru_running and task.wait(30) do
         if __juru_ping() then
             __juru_do_kick()
             break

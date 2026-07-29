@@ -225,7 +225,7 @@ export default function AdminPage() {
         .catch(() => {});
     }
     loadStats();
-    const interval = setInterval(loadStats, 10000);
+    const interval = setInterval(loadStats, 30000);
     return () => clearInterval(interval);
   }, []);
 
