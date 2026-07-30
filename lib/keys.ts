@@ -38,13 +38,12 @@ function expiresAt(type: KeyType): Date | null {
 }
 
 export async function createKey(label: string, type: KeyType = "lifetime"): Promise<ScriptKey> {
-  const expiry = expiresAt(type);
   for (let attempt = 0; attempt < 3; attempt++) {
     const value = generateKeyValue();
     try {
       const rows = await sql`
         INSERT INTO script_keys (key_value, key_type, label, expires_at)
-        VALUES (${value}, ${type}, ${label}, ${expiry})
+        VALUES (${value}, ${type}, ${label}, NULL)
         RETURNING *
       `;
       return rows[0] as ScriptKey;
@@ -88,7 +87,13 @@ export async function verifyKey(
   }
 
   if (!key.hwid) {
-    await sql`UPDATE script_keys SET hwid = ${hwid}, last_used_at = now() WHERE id = ${key.id}`;
+    // First use — lock HWID and start the expiry clock now.
+    const expiry = expiresAt(key.key_type);
+    await sql`
+      UPDATE script_keys
+      SET hwid = ${hwid}, last_used_at = now(), expires_at = ${expiry}
+      WHERE id = ${key.id}
+    `;
     return { valid: true };
   }
 
