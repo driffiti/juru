@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ valid: false, reason: "Loader has expired — re-run the loadstring." });
   }
 
-  let data;
+  let data: Awaited<ReturnType<typeof getSiteData>>;
   try {
     data = await getSiteData();
   } catch (e) {
