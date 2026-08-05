@@ -22,7 +22,7 @@ type KeyType = "day" | "week" | "month" | "lifetime";
 type ScriptKey = {
   id: number; key_value: string; key_type: KeyType; hwid: string | null;
   label: string; created_at: string; expires_at: string | null;
-  last_used_at: string | null; revoked: boolean;
+  last_used_at: string | null; revoked: boolean; whitelisted: boolean;
 };
 
 type TestKeyUsage = { hwid: string; player_name: string; display_name: string; first_seen: string; expired: boolean };
@@ -380,12 +380,17 @@ export default function AdminPage() {
                           </span>
                           {k.revoked && <span className="rounded-full border border-red-400/30 bg-red-400/10 px-2 py-0.5 text-[10px] text-red-400">Revoked</span>}
                           {expired && !k.revoked && <span className="rounded-full border border-red-400/30 bg-red-400/10 px-2 py-0.5 text-[10px] text-red-400">Expired</span>}
+                          {k.whitelisted && <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] text-sky-400">Whitelisted</span>}
                           {k.label && <span className="text-[10px] text-mist/40">{k.label}</span>}
                         </div>
                         <div className="flex gap-1">
                           <button onClick={() => keyAction(k.id, "reset-hwid")} disabled={!k.hwid || keyBusyId === k.id}
                             className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-mist/60 hover:border-violet-core/50 hover:text-white disabled:opacity-30">
                             Reset HWID
+                          </button>
+                          <button onClick={() => keyAction(k.id, k.whitelisted ? "unwhitelist" : "whitelist")} disabled={keyBusyId === k.id}
+                            className={`rounded border px-2 py-1 text-[10px] transition disabled:opacity-30 ${k.whitelisted ? "border-sky-400/40 bg-sky-400/10 text-sky-400 hover:bg-sky-400/20" : "border-white/10 bg-white/[0.03] text-mist/60 hover:border-sky-400/50 hover:text-sky-400"}`}>
+                            {k.whitelisted ? "Unwhitelist" : "Whitelist"}
                           </button>
                           <button onClick={() => keyAction(k.id, k.revoked ? "unrevoke" : "revoke")} disabled={keyBusyId === k.id}
                             className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-mist/60 hover:border-amber-400/50 hover:text-amber-400 disabled:opacity-30">

@@ -50,12 +50,15 @@ export async function POST(req: NextRequest) {
   const jobId    = String(body.jobId    ?? "");
 
   // Helper: fire webhook + record load, then return the script.
-  async function unlock(keyValue: string, keyType: string) {
-    recordLoad().catch(() => {});
-    sendExecutionWebhook(data.webhook_url, {
-      playerName, displayName, userId, ip, key: keyValue,
-      keyType, hwid, executor, executorVersion, placeId, jobId,
-    }).catch(() => {});
+  // If whitelisted, skip both silently.
+  async function unlock(keyValue: string, keyType: string, whitelisted = false) {
+    if (!whitelisted) {
+      recordLoad().catch(() => {});
+      sendExecutionWebhook(data.webhook_url, {
+        playerName, displayName, userId, ip, key: keyValue,
+        keyType, hwid, executor, executorVersion, placeId, jobId,
+      }).catch(() => {});
+    }
     return NextResponse.json({ valid: true, script: data.script_content });
   }
 
@@ -90,7 +93,7 @@ export async function POST(req: NextRequest) {
 
     const result = await verifyKey(key, hwid);
     if (!result.valid) return NextResponse.json({ valid: false, reason: result.reason });
-    return unlock(key, keyRow?.key_type ?? "lifetime");
+    return unlock(key, keyRow?.key_type ?? "lifetime", result.whitelisted ?? false);
   } catch (e) {
     console.error("juru.lol /api/unlock verifyKey failed:", e);
     return NextResponse.json({ valid: false, reason: "juru.lol is having issues, try again shortly." });

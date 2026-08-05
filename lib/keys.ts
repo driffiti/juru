@@ -12,6 +12,7 @@ export type ScriptKey = {
   expires_at: string | null;
   last_used_at: string | null;
   revoked: boolean;
+  whitelisted: boolean;
 };
 
 const CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -67,6 +68,10 @@ export async function setRevoked(id: number, revoked: boolean) {
   await sql`UPDATE script_keys SET revoked = ${revoked} WHERE id = ${id}`;
 }
 
+export async function setWhitelisted(id: number, whitelisted: boolean) {
+  await sql`UPDATE script_keys SET whitelisted = ${whitelisted} WHERE id = ${id}`;
+}
+
 export async function deleteKey(id: number) {
   await sql`DELETE FROM script_keys WHERE id = ${id}`;
 }
@@ -74,7 +79,7 @@ export async function deleteKey(id: number) {
 export async function verifyKey(
   keyValue: string,
   hwid: string
-): Promise<{ valid: boolean; reason?: string }> {
+): Promise<{ valid: boolean; reason?: string; whitelisted?: boolean }> {
   const rows = await sql`SELECT * FROM script_keys WHERE key_value = ${keyValue} LIMIT 1`;
   if (rows.length === 0) return { valid: false, reason: "Invalid key." };
 
@@ -87,14 +92,13 @@ export async function verifyKey(
   }
 
   if (!key.hwid) {
-    // First use — lock HWID and start the expiry clock now.
     const expiry = expiresAt(key.key_type);
     await sql`
       UPDATE script_keys
       SET hwid = ${hwid}, last_used_at = now(), expires_at = ${expiry}
       WHERE id = ${key.id}
     `;
-    return { valid: true };
+    return { valid: true, whitelisted: !!key.whitelisted };
   }
 
   if (key.hwid !== hwid) {
@@ -102,5 +106,5 @@ export async function verifyKey(
   }
 
   await sql`UPDATE script_keys SET last_used_at = now() WHERE id = ${key.id}`;
-  return { valid: true };
+  return { valid: true, whitelisted: !!key.whitelisted };
 }
