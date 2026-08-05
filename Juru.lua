@@ -522,7 +522,7 @@ function F.configPath(name)
 end
 
 function F.getAutoloadName()
-    local name = "default"
+    local name = nil
     pcall(function()
         if typeof(readfile) == "function" and typeof(isfile) == "function" and isfile(AUTOLOAD_FILE) then
             local raw = readfile(AUTOLOAD_FILE)
@@ -532,7 +532,7 @@ function F.getAutoloadName()
         end
     end)
     autoloadConfigName = name
-    return name
+    return name -- nil when no autoload set
 end
 
 function F.setAutoloadConfig(name)
@@ -696,38 +696,24 @@ function F.loadConfig(name)
         else
             error("missing " .. path)
         end
+        if type(raw) ~= "string" or #raw < 2 then error("empty config") end
         local data = HttpService:JSONDecode(raw)
+        if type(data) ~= "table" then error("bad json") end
         F.applyConfigTable(data)
-        -- DO NOT forceRuntimeOff — that wiped the loaded settings
         currentConfigName = name
-        -- re-apply active systems from loaded Config
+        -- Do not auto-start combat systems on config load (was causing crashes).
+        -- Flags are restored; toggle once or use the feature as normal — hooks install on enable callbacks.
         pcall(function()
-            if Config.SilentAim and Config.SilentAim.Enabled then
-                if F.tryInstallSilentAim then F.tryInstallSilentAim() end
-                wallShootHooked = false
-                if F.tryInstallWallShoot then F.tryInstallWallShoot() end
-            end
-            if Config.WallShoot and Config.WallShoot.Enabled then
-                wallShootHooked = false
-                if F.tryInstallWallShoot then F.tryInstallWallShoot() end
-            end
-            if Config.SilentAim and Config.SilentAim.UseCameraAimbot then
-                if F.bindCameraAimbot then F.bindCameraAimbot() end
-            end
-            if Config.Ragebot and Config.Ragebot.Enabled and F.rbStart then
-                F.rbStart()
-            end
-            if Config.RageBot and Config.RageBot.Enabled and F.startRageBot then
-                rageBotEnabled = true
-                F.startRageBot()
+            if Config.TriggerBot and Config.TriggerBot.Enabled == true then
+                triggerEnabled = true
             end
         end)
     end)
     if ok then
-        F.pushNotification("loaded config: " .. name, true)
+        pcall(function() if F.pushNotification then F.pushNotification("loaded config: " .. name, true) end end)
         print("[Juru] Loaded config:", name)
     else
-        F.pushNotification("config load failed", 3)
+        pcall(function() if F.pushNotification then F.pushNotification("config load failed", 3) end end)
         warn("[Juru] loadConfig:", err)
     end
     return ok
@@ -6463,7 +6449,6 @@ function F.applyHitboxToCharacter(char, player)
         tr = math.clamp(tr, 0.05, 0.85)
         hrp.Color = col
         hrp.Transparency = tr
-        -- neon makes expanded HRP much easier to see through walls
         pcall(function()
             if hrp.Material ~= Enum.Material.ForceField then
                 hrp.Material = Enum.Material.ForceField
@@ -7951,11 +7936,45 @@ end)
 local library
 do
     local ok, res = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/i77lhm/Libraries/refs/heads/main/Millenium/Library.lua"))()
+        return loadstring(game:HttpGet("https://raw.githubusercontent.com/driffiti/uilib/refs/heads/main/ui.lua"))()
     end)
     if ok and res then
         library = res
         print("[Juru] Millenium library loaded")
+        -- Replace load_config: library uses `continue` and can crash some executors / bad flags
+        pcall(function()
+            function library:load_config(config_json)
+                if type(config_json) ~= "string" or #config_json < 2 then return end
+                local okd, config = pcall(function()
+                    return game:GetService("HttpService"):JSONDecode(config_json)
+                end)
+                if not okd or type(config) ~= "table" then return end
+                for key, v in pairs(config) do
+                    if key ~= "config_name_list" then
+                        local function_set = library.config_flags and library.config_flags[key]
+                        if type(function_set) == "function" then
+                            pcall(function()
+                                if type(v) == "table" and v.Color then
+                                    local col = v.Color
+                                    if type(col) == "string" then
+                                        local okc, c3 = pcall(function() return Color3.fromHex(col) end)
+                                        if okc and c3 then
+                                            function_set(c3, v.Transparency or 0)
+                                        end
+                                    elseif typeof(col) == "Color3" then
+                                        function_set(col, v.Transparency or 0)
+                                    end
+                                elseif type(v) == "table" and v.active ~= nil then
+                                    function_set(v)
+                                else
+                                    function_set(v)
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+        end)
     else
         warn("[Juru] Millenium load failed:", res)
     end
@@ -8064,8 +8083,24 @@ else
         name = "juru",
         suffix = ".lol",
         gameInfo = "juru.lol · " .. tostring(placeName),
-        size = UDim2.new(0, 700, 0, 565),
+        size = UDim2.new(0, 720, 0, 575),
     })
+    -- Reliable menu toggle (library keybind needs explicit KeyCode)
+    pcall(function()
+        local menuVisible = true
+        if window.toggle_menu then window.toggle_menu(true) end
+        F.jConnect(UserInputService.InputBegan, function(input, gp)
+            if gp then return end
+            if input.KeyCode == Enum.KeyCode.LeftAlt then
+                menuVisible = not menuVisible
+                if window.toggle_menu then
+                    window.toggle_menu(menuVisible)
+                elseif library.items then
+                    library.items.Enabled = menuVisible
+                end
+            end
+        end)
+    end)
     -- Full purple theme (accent + UI recolor)
     local PURPLE = Color3.fromRGB(170, 100, 255)
     local PURPLE_LIGHT = Color3.fromRGB(200, 150, 255)
@@ -9202,114 +9237,235 @@ else
         keys:keybind({ name = "Orbit Key", seperator = false, callback = function() end })
     end
 
-    -- Single config UI (Millenium Settings) + Autoload + Juru feature snapshot
+    -- Configs: list + save/overwrite/load/delete/autoload (uses library list holder pattern)
     pcall(function()
+        local dir = library.directory or "milenium"
+        pcall(function()
+            if typeof(makefolder) == "function" then
+                makefolder(dir)
+                makefolder(dir .. "/configs")
+            end
+        end)
+
+        -- Patch library:init_config to add Overwrite + Autoload, and dual-save Juru features
+        local old_init = library.init_config
+        function library:init_config(win)
+            -- Call original (creates Configs tab, list, Save/Load/Delete)
+            if type(old_init) == "function" then
+                old_init(self, win)
+            end
+        end
+        -- Prefer our own full configs UI so we control buttons and list refresh
         window:seperator({ name = "Settings" })
         local main = window:tab({ name = "Configs", icon = "rbxassetid://10734950309", tabs = { "Main" } })
-        local column = main:column({})
-        local section = column:section({ name = "Configs", size = 1, default = true })
-        local config_holder = section:list({
-            options = { "default" },
-            callback = function(option) end,
-            flag = "config_name_list",
-        })
-        pcall(function() library:update_config_list() end)
+        local colL = main:column({})
+        local colR = main:column({})
 
-        local column2 = main:column({})
-        local settings = column2:section({ name = "Settings", size = 1, default = true })
+        local listSec = colL:section({ name = "Configs", size = 1, default = true })
+        local settings = colR:section({ name = "Settings", size = 1, default = true })
+
+        local selectedName = "default"
+        local function resolveName(preferText)
+            local flags = library.flags or {}
+            local n = nil
+            if preferText then
+                n = flags["config_name_text"]
+            end
+            if type(n) ~= "string" or not n:match("%S") then
+                n = selectedName or flags["config_name_list"] or flags["config_name_text"] or "default"
+            end
+            n = tostring(n):gsub("^%s+", ""):gsub("%s+$", "")
+            if n == "" then n = "default" end
+            return n
+        end
+
+        local function listCfgNames()
+            local names, seen = {}, {}
+            local function add(raw)
+                local n = tostring(raw or "")
+                n = n:gsub("\\", "/"):match("([^/]+)$") or n
+                n = n:gsub("%.cfg$", ""):gsub("%.json$", "")
+                if n ~= "" and n:sub(1, 1) ~= "_" and not seen[n] then
+                    seen[n] = true
+                    table.insert(names, n)
+                end
+            end
+            pcall(function()
+                if typeof(listfiles) ~= "function" then return end
+                for _, f in ipairs(listfiles(dir .. "/configs") or {}) do add(f) end
+            end)
+            pcall(function()
+                if typeof(listfiles) ~= "function" then return end
+                for _, f in ipairs(listfiles("JuruConfigs") or {}) do add(f) end
+            end)
+            table.sort(names)
+            if #names == 0 then table.insert(names, "default") end
+            return names
+        end
+
+        local cfgListObj = nil
+        local function refreshList()
+            local names = listCfgNames()
+            pcall(function()
+                if cfgListObj and cfgListObj.refresh_options then
+                    cfgListObj.refresh_options(names)
+                end
+            end)
+            pcall(function() library:update_config_list() end)
+            return names
+        end
+
+        local names0 = listCfgNames()
+        cfgListObj = listSec:list({
+            options = names0,
+            flag = "config_name_list",
+            callback = function(opt)
+                selectedName = tostring(opt)
+            end,
+        })
+
+        -- Point library's update_config_list at our list so anything calling it works
+        pcall(function()
+            function library:update_config_list()
+                refreshList()
+            end
+        end)
+
+        local function saveUiCfg(name)
+            if typeof(writefile) ~= "function" then return false end
+            local payload = library:get_config()
+            writefile(dir .. "/configs/" .. name .. ".cfg", payload)
+            return true
+        end
+
+        local function loadUiCfg(name)
+            local path = dir .. "/configs/" .. name .. ".cfg"
+            if typeof(isfile) == "function" and isfile(path) then
+                library:load_config(readfile(path))
+                return true
+            end
+            return false
+        end
+
         settings:textbox({ name = "Config name:", flag = "config_name_text" })
+
         settings:button({
             name = "Save",
             callback = function()
-                local flags = library.flags or {}
-                local n = flags["config_name_text"]
-                if type(n) ~= "string" or not n:match("%S") then
-                    n = flags["config_name_list"] or currentConfigName or "default"
-                end
-                n = tostring(n):gsub("^%s+", ""):gsub("%s+$", "")
-                if n == "" then n = "default" end
-                local okUi, errUi = pcall(function()
-                    if typeof(makefolder) == "function" then
-                        pcall(makefolder, library.directory)
-                        pcall(makefolder, library.directory .. "/configs")
-                    end
-                    if typeof(writefile) ~= "function" then error("no writefile") end
-                    local payload = library:get_config()
-                    writefile(library.directory .. "/configs/" .. n .. ".cfg", payload)
-                    pcall(function() library:update_config_list() end)
+                local n = resolveName(true)
+                selectedName = n
+                local ok = pcall(function()
+                    assert(saveUiCfg(n))
+                    if F.saveConfig then F.saveConfig(n) end
                 end)
-                local okJ = false
+                refreshList()
+                print("[Juru] Save", n, ok)
                 pcall(function()
-                    if F.saveConfig then okJ = F.saveConfig(n) end
-                end)
-                print("[Juru] Save", n, "ui=", okUi, "features=", okJ, errUi)
-                pcall(function()
-                    if F.pushNotification then
-                        F.pushNotification(okUi or okJ and ("saved " .. n) or "save failed", true)
-                    end
+                    if F.pushNotification then F.pushNotification(ok and ("saved " .. n) or "save failed", true) end
                 end)
             end,
         })
+
+        settings:button({
+            name = "Overwrite",
+            callback = function()
+                -- overwrite currently selected list entry (ignore empty textbox)
+                local n = resolveName(false)
+                selectedName = n
+                local ok = pcall(function()
+                    assert(saveUiCfg(n))
+                    if F.saveConfig then F.saveConfig(n) end
+                end)
+                refreshList()
+                print("[Juru] Overwrite", n, ok)
+                pcall(function()
+                    if F.pushNotification then F.pushNotification(ok and ("overwrote " .. n) or "overwrite failed", true) end
+                end)
+            end,
+        })
+
         settings:button({
             name = "Load",
             callback = function()
-                local flags = library.flags or {}
-                local n = flags["config_name_list"] or flags["config_name_text"] or currentConfigName or "default"
-                n = tostring(n)
-                local okUi = pcall(function()
-                    local path = library.directory .. "/configs/" .. n .. ".cfg"
-                    if typeof(isfile) == "function" and isfile(path) then
-                        library:load_config(readfile(path))
-                    end
-                    pcall(function() library:update_config_list() end)
-                end)
-                local okJ = false
-                pcall(function()
-                    if F.loadConfig then okJ = F.loadConfig(n) end
-                end)
-                print("[Juru] Load", n, "ui=", okUi, "features=", okJ)
+                local n = resolveName(false)
+                local okUi = pcall(function() loadUiCfg(n) end)
+                local okJ = pcall(function() if F.loadConfig then F.loadConfig(n) end end)
+                refreshList()
+                print("[Juru] Load", n, okUi, okJ)
             end,
         })
+
         settings:button({
             name = "Delete",
             callback = function()
-                local flags = library.flags or {}
-                local n = flags["config_name_list"] or "default"
-                n = tostring(n)
-                pcall(function()
-                    delfile(library.directory .. "/configs/" .. n .. ".cfg")
-                    library:update_config_list()
-                end)
+                local n = resolveName(false)
+                pcall(function() delfile(dir .. "/configs/" .. n .. ".cfg") end)
                 pcall(function() if F.deleteConfig then F.deleteConfig(n) end end)
+                refreshList()
+                print("[Juru] Delete", n)
             end,
         })
+
         settings:button({
             name = "Set Autoload",
             callback = function()
-                local flags = library.flags or {}
-                local n = flags["config_name_list"] or flags["config_name_text"] or "default"
-                n = tostring(n)
-                pcall(function() if F.setAutoloadConfig then F.setAutoloadConfig(n) end end)
+                local n = resolveName(false)
                 pcall(function()
-                    if writefile then
-                        writefile(library.directory .. "/autoload.txt", n)
-                    end
+                    if F.setAutoloadConfig then F.setAutoloadConfig(n) end
                 end)
+                pcall(function()
+                    if writefile then writefile(dir .. "/autoload.txt", n) end
+                end)
+                pcall(function()
+                    if writefile then writefile("JuruConfigs/_autoload.txt", n) end
+                end)
+                shared._juruAutoloadPending = n
                 print("[Juru] Autoload set:", n)
+                pcall(function()
+                    if F.pushNotification then F.pushNotification("autoload: " .. n, true) end
+                end)
             end,
         })
+
+        settings:button({
+            name = "Load Autoload",
+            callback = function()
+                local n = shared._juruAutoloadPending
+                pcall(function()
+                    if (not n or n == "") and F.getAutoloadName then n = F.getAutoloadName() end
+                end)
+                if not n or n == "" then
+                    print("[Juru] No autoload set")
+                    return
+                end
+                -- features only — never library:load_config here
+                local ok = false
+                pcall(function()
+                    if F.loadConfig then ok = F.loadConfig(n) == true end
+                end)
+                print("[Juru] Load Autoload", n, ok)
+                pcall(function()
+                    if F.pushNotification then F.pushNotification(ok and ("loaded " .. n) or "load failed", true) end
+                end)
+            end,
+        })
+
         settings:button({
             name = "Clear Autoload",
             callback = function()
-                pcall(function()
-                    if writefile then writefile((F and F.configPath and "JuruConfigs/_autoload.txt") or "JuruConfigs/_autoload.txt", "") end
-                end)
-                pcall(function()
-                    if writefile then writefile(library.directory .. "/autoload.txt", "") end
-                end)
+                pcall(function() if delfile and isfile and isfile(dir .. "/autoload.txt") then delfile(dir .. "/autoload.txt") end end)
+                pcall(function() if delfile and isfile and isfile("JuruConfigs/_autoload.txt") then delfile("JuruConfigs/_autoload.txt") end end)
+                pcall(function() if writefile then writefile(dir .. "/autoload.txt", "") end end)
+                pcall(function() if writefile then writefile("JuruConfigs/_autoload.txt", "") end end)
                 print("[Juru] Autoload cleared")
             end,
         })
+
+        settings:button({
+            name = "Refresh List",
+            callback = function() refreshList() end,
+        })
+
         settings:colorpicker({
             name = "Menu Accent",
             color = Color3.fromRGB(170, 100, 255),
@@ -9317,19 +9473,49 @@ else
                 pcall(function() library:update_theme("accent", color) end)
             end,
         })
+
         settings:keybind({
             name = "Menu Bind",
+            key = Enum.KeyCode.LeftAlt,
+            mode = "Toggle",
+            default = true, -- menu starts visible
             callback = function(bool)
-                pcall(function() window.toggle_menu(bool) end)
+                pcall(function()
+                    if window and window.toggle_menu then
+                        window.toggle_menu(bool == true)
+                    elseif library and library.items then
+                        library.items.Enabled = bool == true
+                    end
+                end)
             end,
-            default = true,
         })
+
+        -- Backup LeftAlt toggle (library keybind is flaky if key never bound)
+        pcall(function()
+            local menuOpen = true
+            UserInputService.InputBegan:Connect(function(input, gp)
+                if gp then return end
+                if input.KeyCode == Enum.KeyCode.LeftAlt then
+                    menuOpen = not menuOpen
+                    pcall(function()
+                        if window and window.toggle_menu then
+                            window.toggle_menu(menuOpen)
+                        elseif library and library.items then
+                            library.items.Enabled = menuOpen
+                        end
+                    end)
+                end
+            end)
+        end)
+
+        task.defer(refreshList)
+        task.delay(0.4, refreshList)
     end)
 
-    -- ALWAYS force every feature OFF on first menu load (toggles stay off, nothing runs)
+    -- Always start with features OFF. Autoload does NOT run on inject (crashes games).
+    -- Use Configs → Load after inject, or Load Autoload button.
     pcall(function() if F.forceRuntimeOff then F.forceRuntimeOff() end end)
     pcall(function()
-        -- belt-and-suspenders: every flag off
         for _, key in ipairs({
             "SilentAim","WallShoot","SoftLock","Ragebot","RageBot","TriggerBot","Hitbox",
             "Visuals","FOV","HitMarker","LocalFx","KeyOverlay","HitSound","AutoReload",
@@ -9361,32 +9547,16 @@ else
         wallShootHooked = false
     end)
 
-    -- Autoload Millenium UI theme only — NEVER auto-enable Juru combat/visual features
+    shared._juruAutoloadPending = nil
     pcall(function()
-        local name = nil
-        pcall(function()
-            local p = library.directory .. "/autoload.txt"
-            if isfile and isfile(p) then
-                local raw = readfile(p)
-                if type(raw) == "string" and raw:match("%S") then
-                    name = raw:match("^%s*(.-)%s*$")
-                end
-            end
-        end)
-        if name and name ~= "" then
-            local path = library.directory .. "/configs/" .. name .. ".cfg"
-            pcall(function()
-                if isfile and isfile(path) then
-                    library:load_config(readfile(path))
-                end
-            end)
-            -- do NOT F.loadConfig here — that was turning silent/esp/wall on while toggles looked off
-            print("[Juru] UI autoload only:", name, "(features stay OFF until you toggle)")
+        local n = F.getAutoloadName and F.getAutoloadName()
+        if type(n) == "string" and n ~= "" then
+            shared._juruAutoloadPending = n
+            print("[Juru] Autoload name stored (not applied on inject):", n)
+            print("[Juru] Open Configs and press Load Autoload to apply")
         end
     end)
 
-    -- final hard off after any UI load
-    pcall(function() if F.forceRuntimeOff then F.forceRuntimeOff() end end)
     pcall(function() library:update_theme("accent", Color3.fromRGB(170, 100, 255)) end)
     pcall(function()
         if library.themes and library.themes.preset then

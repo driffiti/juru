@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   const key      = typeof body.key  === "string" ? body.key.trim().toUpperCase() : "";
   const hwid     = typeof body.hwid === "string" && body.hwid ? body.hwid.slice(0, 128) : "unknown-hwid";
-  const ip       = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip       = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   const executor = typeof body.executor        === "string" ? body.executor.slice(0, 40)        : "Unknown";
   const executorVersion = typeof body.executorVersion === "string" ? body.executorVersion.slice(0, 20) : "";
   const playerName  = typeof body.playerName  === "string" ? body.playerName.slice(0, 40)  : "unknown";
