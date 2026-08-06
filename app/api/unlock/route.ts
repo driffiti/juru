@@ -21,7 +21,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ valid: false, reason: "Bad request." }, { status: 400 });
   }
 
-  const nonceValid = await verifyNonce(body.nonce);
+  const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+
+  const nonceValid = await verifyNonce(body.nonce, ip);
   if (!nonceValid) {
     return NextResponse.json({ valid: false, reason: "Loader has expired — re-run the loadstring." });
   }
@@ -40,7 +42,6 @@ export async function POST(req: NextRequest) {
 
   const key      = typeof body.key  === "string" ? body.key.trim().toUpperCase() : "";
   const hwid     = typeof body.hwid === "string" && body.hwid ? body.hwid.slice(0, 128) : "unknown-hwid";
-  const ip       = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   const executor = typeof body.executor        === "string" ? body.executor.slice(0, 40)        : "Unknown";
   const executorVersion = typeof body.executorVersion === "string" ? body.executorVersion.slice(0, 20) : "";
   const playerName  = typeof body.playerName  === "string" ? body.playerName.slice(0, 40)  : "unknown";
@@ -48,6 +49,28 @@ export async function POST(req: NextRequest) {
   const userId   = typeof body.userId  === "number" ? Math.floor(body.userId) : 0;
   const placeId  = String(body.placeId  ?? "0");
   const jobId    = String(body.jobId    ?? "");
+
+  // Inject a HWID check so the extracted script only runs on the device
+  // it was issued for, and embed the key as a watermark for traceability.
+  function buildServedScript(content: string, boundHwid: string, keyValue: string): string {
+    return `-- juru.lol
+local __jura_k = "${keyValue.replace(/"/g, '')}"
+local __jura_h = "${boundHwid.replace(/"/g, '')}"
+local __jura_v = (function()
+    local ok, id = pcall(function()
+        if gethwid then return gethwid() end
+        if syn and syn.get_hwid then return syn.get_hwid() end
+        if get_hwid then return get_hwid() end
+        local r = game:GetService("RbxAnalyticsService"):GetClientId()
+        if r and r ~= "" then return r end
+        return __jura_h
+    end)
+    return (ok and id or __jura_h)
+end)()
+if __jura_v ~= __jura_h then return end
+
+${content}`;
+  }
 
   // Helper: fire webhook + record load, then return the script.
   // If whitelisted, skip both silently.
@@ -59,7 +82,7 @@ export async function POST(req: NextRequest) {
         keyType, hwid, executor, executorVersion, placeId, jobId,
       }).catch(() => {});
     }
-    return NextResponse.json({ valid: true, script: data.script_content });
+    return NextResponse.json({ valid: true, script: buildServedScript(data.script_content, hwid, keyValue) });
   }
 
   // Test key — always checked first, bypasses require_key toggle.
