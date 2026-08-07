@@ -19,10 +19,10 @@ export async function GET(req: NextRequest, { params }: { params: { file: string
 
   recordLoad().catch(() => {});
 
-  // Generate a fresh nonce on every request. It's embedded as a Lua
-  // variable and must be echoed back to /api/unlock. Valid for ~60s,
-  // so a cached/replayed curl response stops working quickly.
-  const nonce = await generateNonce();
+  // Bind the nonce to the client IP so it can only be redeemed from the
+  // same machine that fetched the loader.
+  const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const nonce = await generateNonce(ip);
 
   return new NextResponse(buildBootstrap(nonce), {
     status: 200,
