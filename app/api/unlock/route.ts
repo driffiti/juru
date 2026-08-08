@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isRobloxClient } from "@/lib/roblox";
 import { getSiteData } from "@/lib/db";
 import { verifyKey } from "@/lib/keys";
 import { verifyTestKey } from "@/lib/testkey";
@@ -10,10 +9,6 @@ import { sendExecutionWebhook } from "@/lib/webhook";
 export const revalidate = 0;
 
 export async function POST(req: NextRequest) {
-  if (!isRobloxClient(req.headers.get("user-agent"))) {
-    return NextResponse.json({ valid: false, reason: "Forbidden." }, { status: 403 });
-  }
-
   let body: any;
   try {
     body = await req.json();

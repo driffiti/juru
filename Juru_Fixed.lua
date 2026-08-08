@@ -899,11 +899,21 @@ function F.saveConfig(name)
 end
 
 function F.applyMovementFromConfig()
-    -- Sync speed/cframe/jump from config. Fly is KEYBIND-ONLY (never auto-start).
-    SpeedEnabled = (Config.Speed and Config.Speed.Enabled == true) or false
-    cFrameSpeedEnabled = (Config.CFrameSpeed and Config.CFrameSpeed.Enabled == true) or false
-    superJumpActive = (Config.SuperJump and Config.SuperJump.Enabled == true) or false
-    -- Do NOT set flyEnabled / setFly here — user must press fly keybind
+    -- Allow from config = active (same as menu toggle). Prefer CFrame over Walk if both saved.
+    local speedAllow = Config.Speed and Config.Speed.Enabled == true
+    local cframeAllow = Config.CFrameSpeed and Config.CFrameSpeed.Enabled == true
+    local jumpAllow = Config.SuperJump and Config.SuperJump.Enabled == true
+    if cframeAllow then
+        cFrameSpeedEnabled = true
+        SpeedEnabled = false
+    elseif speedAllow then
+        SpeedEnabled = true
+        cFrameSpeedEnabled = false
+    else
+        SpeedEnabled = false
+        cFrameSpeedEnabled = false
+    end
+    superJumpActive = jumpAllow == true
     if flyEnabled and not (Config.Fly and Config.Fly.Enabled == true) then
         flyEnabled = false
         pcall(function() if F.setFly then F.setFly(false) end end)
@@ -913,20 +923,17 @@ function F.applyMovementFromConfig()
         local hum = c and c:FindFirstChildOfClass("Humanoid")
         if not hum then return end
         if SpeedEnabled then
-            local t = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
-            hum.WalkSpeed = t
+            hum.WalkSpeed = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
         else
             hum.WalkSpeed = BaseSpeed or 16
         end
     end)
-    print(string.format(
-        "[Juru][Move] applied speed=%s(%.0f) cframe=%s jump=%s flyActive=%s flyAllow=%s",
+    warn(string.format(
+        "[Juru][Move] speed=%s(%.0f) cframe=%s jump=%s",
         tostring(SpeedEnabled),
         tonumber(Config.Speed and Config.Speed.WalkSpeed) or 16,
         tostring(cFrameSpeedEnabled),
-        tostring(superJumpActive),
-        tostring(flyEnabled),
-        tostring(Config.Fly and Config.Fly.Enabled)
+        tostring(superJumpActive)
     ))
 end
 
@@ -6015,16 +6022,11 @@ F.jConnect(LocalPlayer.CharacterAdded, function(char)
             if not c or not c.Parent then return end
             local hum = c:FindFirstChildOfClass("Humanoid")
             if not hum then return end
-            -- Re-apply from config after respawn (autoload / saved allows)
-            if Config.Speed and Config.Speed.Enabled == true then
-                SpeedEnabled = true
-                hum.WalkSpeed = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
-            else
-                SpeedEnabled = false
-                hum.WalkSpeed = BaseSpeed or 16
-            end
-            cFrameSpeedEnabled = (Config.CFrameSpeed and Config.CFrameSpeed.Enabled == true) or false
-            superJumpActive = (Config.SuperJump and Config.SuperJump.Enabled == true) or false
+            -- Keep allows from config; runtime speed/cframe/jump off until keybind
+            SpeedEnabled = false
+            cFrameSpeedEnabled = false
+            superJumpActive = false
+            hum.WalkSpeed = BaseSpeed or 16
         end)
     end)
     if flyEnabled and Config.Fly and Config.Fly.Enabled then
@@ -7754,30 +7756,85 @@ end)
 
 
 
--- WalkSpeed: every physics step (game often resets to 16 between frames)
-F.jConnect(RunService.Stepped, function()
+-- Dedicated movement keybinds (ignore gameProcessed — always fire)
+task.defer(function()
+    local conn = UserInputService.InputBegan:Connect(function(input, _gp)
+        if not JuruAlive then return end
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        local name = input.KeyCode.Name
+        local function bindName(field, fallback)
+            local b = Config.Keybinds and Config.Keybinds[field]
+            if type(b) == "table" then b = b.Key or b.key end
+            b = tostring(b or fallback):gsub("Enum.KeyCode.", "")
+            return b
+        end
+        local now = tick()
+        -- Speed
+        if name == bindName("Speed", "Z") then
+            if now - (F._speedKeyAt or 0) < 0.35 then return end
+            F._speedKeyAt = now
+            if not Config.Speed then Config.Speed = { WalkSpeed = 16, Enabled = false } end
+            Config.Speed.Enabled = true
+            SpeedEnabled = not SpeedEnabled
+            if SpeedEnabled then cFrameSpeedEnabled = false end
+            pcall(function()
+                local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                if not hum then return end
+                hum.WalkSpeed = SpeedEnabled and math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500) or (BaseSpeed or 16)
+            end)
+            warn("[Juru][Speed] KEY active=", SpeedEnabled, "ws=", Config.Speed.WalkSpeed)
+            pcall(function() if F.pushNotification then F.pushNotification(SpeedEnabled and "speed on" or "speed off", false) end end)
+            return
+        end
+        -- CFrame
+        if name == bindName("CFrameSpeed", "C") then
+            if now - (F._cframeKeyAt or 0) < 0.35 then return end
+            F._cframeKeyAt = now
+            if not Config.CFrameSpeed then Config.CFrameSpeed = { Speed = 0.9, Enabled = false } end
+            Config.CFrameSpeed.Enabled = true
+            cFrameSpeedEnabled = not cFrameSpeedEnabled
+            if cFrameSpeedEnabled then
+                SpeedEnabled = false
+                pcall(function()
+                    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                    if hum then hum.WalkSpeed = BaseSpeed or 16 end
+                end)
+            end
+            warn("[Juru][CFrame] KEY active=", cFrameSpeedEnabled)
+            pcall(function() if F.pushNotification then F.pushNotification(cFrameSpeedEnabled and "cframe on" or "cframe off", false) end end)
+            return
+        end
+        -- Super Jump
+        if name == bindName("SuperJump", "V") then
+            if now - (F._jumpKeyAt or 0) < 0.35 then return end
+            F._jumpKeyAt = now
+            if not Config.SuperJump then Config.SuperJump = { Power = 50, Enabled = false } end
+            Config.SuperJump.Enabled = true
+            superJumpActive = not superJumpActive
+            warn("[Juru][Jump] KEY active=", superJumpActive, "power=", Config.SuperJump.Power)
+            return
+        end
+    end)
+    pcall(function()
+        if JuruConns then
+            table.insert(JuruConns, conn)
+        end
+    end)
+end)
+
+-- Walk Speed: ONLY Humanoid.WalkSpeed when SpeedEnabled
+F.jConnect(RunService.Heartbeat, function()
     if not JuruAlive then return end
-    if not (SpeedEnabled and Config.Speed and Config.Speed.Enabled == true) then return end
+    if not SpeedEnabled then return end
     if tick() < (charReadyAt or 0) then return end
     local c = LocalPlayer.Character
     if not c or not c.Parent then return end
     local hum = c:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
-    local t = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
+    local t = math.clamp(tonumber(Config.Speed and Config.Speed.WalkSpeed) or 16, 1, 500)
     if hum.WalkSpeed ~= t then
         hum.WalkSpeed = t
     end
-end)
-F.jConnect(RunService.Heartbeat, function()
-    if not JuruAlive then return end
-    if not (SpeedEnabled and Config.Speed and Config.Speed.Enabled == true) then return end
-    if tick() < (charReadyAt or 0) then return end
-    local c = LocalPlayer.Character
-    if not c or not c.Parent then return end
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return end
-    local t = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
-    hum.WalkSpeed = t
 end)
 
 -- Super jump (old method): toggle on keybind, hold key for Y velocity boost.
@@ -8620,8 +8677,23 @@ pcall(function()
 end)
 
 F.jConnect(UserInputService.InputBegan, function(input, processed)
-    if processed then return end
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    -- Still allow movement keybinds when Roblox marks processed (chat focus etc. only block non-movement)
+    local code = input.KeyCode
+    local isMoveKey = code == Enum.KeyCode.Z or code == Enum.KeyCode.C or code == Enum.KeyCode.V
+        or code == Enum.KeyCode.N or code == Enum.KeyCode.Q or code == Enum.KeyCode.T
+    if processed and not isMoveKey then
+        -- allow bound keys from Config too
+        local bound = false
+        pcall(function()
+            local kb = Config.Keybinds or {}
+            for _, v in pairs(kb) do
+                local kn = type(v) == "table" and (v.Key or v.key) or v
+                if tostring(kn) == code.Name then bound = true break end
+            end
+        end)
+        if not bound then return end
+    end
 
     -- capture next key for menu "set keybind" buttons
     if F._pendingKeybind and input.KeyCode ~= Enum.KeyCode.Unknown then
@@ -8728,38 +8800,47 @@ F.jConnect(UserInputService.InputBegan, function(input, processed)
 
     if keyMatches(Config.Keybinds.Speed) then
         if not Config.Speed then Config.Speed = { WalkSpeed = 16, Enabled = false } end
-        if Config.Speed.Enabled ~= true then
-            SpeedEnabled = false
-            pcall(function()
-                local c = LocalPlayer.Character
-                local hum = c and c:FindFirstChildOfClass("Humanoid")
-                if hum then hum.WalkSpeed = BaseSpeed or 16 end
-            end)
+        if tick() - (F._speedKeyAt or 0) < 0.4 then
+            -- ignore double-fire
         else
-            SpeedEnabled = not SpeedEnabled
-            if not SpeedEnabled then
+            F._speedKeyAt = tick()
+            if Config.Speed.Enabled ~= true then
+                SpeedEnabled = false
+                print("[Juru][Speed] blocked — enable Walk Speed (allow) in Misc")
+            else
+                -- exclusive: turning speed on turns cframe off (stops them fighting)
+                SpeedEnabled = not SpeedEnabled
+                if SpeedEnabled then
+                    cFrameSpeedEnabled = false
+                end
+                print("[Juru][Speed] active=", SpeedEnabled, "want=", Config.Speed.WalkSpeed)
                 pcall(function()
                     local c = LocalPlayer.Character
                     local hum = c and c:FindFirstChildOfClass("Humanoid")
-                    if hum then hum.WalkSpeed = BaseSpeed or 16 end
+                    if not hum then return end
+                    if SpeedEnabled then
+                        hum.WalkSpeed = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
+                    else
+                        hum.WalkSpeed = BaseSpeed or 16
+                    end
                 end)
             end
+            pcall(function() if F.refreshKeybindList then F.refreshKeybindList() end end)
         end
-        pcall(function() if F.refreshKeybindList then F.refreshKeybindList() end end)
     end
 
 
     if keyMatches(Config.Keybinds.SuperJump) then
         if not Config.SuperJump then Config.SuperJump = { Power = 50, Enabled = false } end
-        -- debounce: avoid double-toggle from key repeat
-        if tick() - (F._jumpKeyAt or 0) < 0.35 then return end
-        F._jumpKeyAt = tick()
-        if Config.SuperJump.Enabled ~= true then
-            superJumpActive = false
-        else
-            superJumpActive = not superJumpActive
+        if tick() - (F._jumpKeyAt or 0) >= 0.35 then
+            F._jumpKeyAt = tick()
+            if Config.SuperJump.Enabled ~= true then
+                superJumpActive = false
+            else
+                superJumpActive = not superJumpActive
+            end
+            pcall(function() if F.refreshKeybindList then F.refreshKeybindList() end end)
         end
-        pcall(function() if F.refreshKeybindList then F.refreshKeybindList() end end)
     end
 
 
@@ -8782,10 +8863,24 @@ F.jConnect(UserInputService.InputBegan, function(input, processed)
 
     if keyMatches(Config.Keybinds.CFrameSpeed) then
         if not Config.CFrameSpeed then Config.CFrameSpeed = { Speed = 0.9, Enabled = false } end
-        if Config.CFrameSpeed.Enabled ~= true then
-            cFrameSpeedEnabled = false
+        if tick() - (F._cframeKeyAt or 0) < 0.4 then
+            -- ignore double-fire
         else
-            cFrameSpeedEnabled = not cFrameSpeedEnabled
+            F._cframeKeyAt = tick()
+            if Config.CFrameSpeed.Enabled ~= true then
+                cFrameSpeedEnabled = false
+            else
+                cFrameSpeedEnabled = not cFrameSpeedEnabled
+                if cFrameSpeedEnabled then
+                    SpeedEnabled = false -- exclusive
+                    pcall(function()
+                        local c = LocalPlayer.Character
+                        local hum = c and c:FindFirstChildOfClass("Humanoid")
+                        if hum then hum.WalkSpeed = BaseSpeed or 16 end
+                    end)
+                end
+                print("[Juru][CFrame] active=", cFrameSpeedEnabled)
+            end
             pcall(function() if F.refreshKeybindList then F.refreshKeybindList() end end)
         end
     end
@@ -9783,29 +9878,46 @@ else
         move:toggle({ name = "Walk Speed (allow)", default = false, seperator = true, callback = function(v)
             if not Config.Speed then Config.Speed = { WalkSpeed = 16 } end
             Config.Speed.Enabled = v == true
-            if not v then
-                SpeedEnabled = false
-                pcall(function()
-                    local c = LocalPlayer.Character
-                    local hum = c and c:FindFirstChildOfClass("Humanoid")
-                    if hum then hum.WalkSpeed = 16 end
-                end)
+            -- Allow ON = speed active immediately (no extra key required)
+            SpeedEnabled = v == true
+            if SpeedEnabled then
+                cFrameSpeedEnabled = false -- exclusive
             end
-            print("[Juru][Speed] ALLOW=", v, "active=", SpeedEnabled, "slider=", Config.Speed.WalkSpeed)
+            pcall(function()
+                local c = LocalPlayer.Character
+                local hum = c and c:FindFirstChildOfClass("Humanoid")
+                if not hum then return end
+                if SpeedEnabled then
+                    hum.WalkSpeed = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
+                else
+                    hum.WalkSpeed = BaseSpeed or 16
+                end
+            end)
+            warn("[Juru][Speed] allow/active=", SpeedEnabled, "slider=", Config.Speed.WalkSpeed)
+            pcall(function() if F.pushNotification then F.pushNotification(SpeedEnabled and "speed on" or "speed off", false) end end)
         end })
         move:slider({ name = "Speed Value", min = 16, max = 500, default = 16, seperator = true, callback = function(v) if not Config.Speed then Config.Speed = {} end; Config.Speed.WalkSpeed = v end })
         move:toggle({ name = "CFrame Speed (allow)", default = false, seperator = true, callback = function(v)
             if not Config.CFrameSpeed then Config.CFrameSpeed = {} end
             Config.CFrameSpeed.Enabled = v == true
-            if not v then cFrameSpeedEnabled = false end
-            print("[Juru][CFrame] ALLOW=", v, "active=", cFrameSpeedEnabled)
+            cFrameSpeedEnabled = v == true
+            if cFrameSpeedEnabled then
+                SpeedEnabled = false
+                pcall(function()
+                    local c = LocalPlayer.Character
+                    local hum = c and c:FindFirstChildOfClass("Humanoid")
+                    if hum then hum.WalkSpeed = BaseSpeed or 16 end
+                end)
+            end
+            warn("[Juru][CFrame] allow/active=", cFrameSpeedEnabled)
+            pcall(function() if F.pushNotification then F.pushNotification(cFrameSpeedEnabled and "cframe on" or "cframe off", false) end end)
         end })
         move:slider({ name = "CFrame Amount", min = 1, max = 40, default = 9, seperator = true, callback = function(v) if not Config.CFrameSpeed then Config.CFrameSpeed = {} end; Config.CFrameSpeed.Speed = v / 10 end })
         move:toggle({ name = "Super Jump (allow)", default = false, seperator = true, callback = function(v)
             if not Config.SuperJump then Config.SuperJump = {} end
             Config.SuperJump.Enabled = v == true
-            if not v then superJumpActive = false end
-            print("[Juru][Jump] ALLOW=", v, "active=", superJumpActive, "power=", Config.SuperJump.Power)
+            superJumpActive = v == true
+            warn("[Juru][Jump] allow/active=", superJumpActive, "power=", Config.SuperJump.Power)
         end })
         move:slider({ name = "Jump Power", min = 50, max = 400, default = 50, seperator = false, callback = function(v) if not Config.SuperJump then Config.SuperJump = {} end; Config.SuperJump.Power = v end })
         local fly = colR:section({ name = "Fly", default = true, size = 1 })
