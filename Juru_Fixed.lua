@@ -351,8 +351,10 @@ shared.Juru = {
         Key     = "F6",
     },
     Crosshair = {
-        Style = "Default", -- "Default" = original purple cross, or Icon 1-5
+        Enabled = true,
+        Style = "Default", -- Default | Hello Kitty | Crosshair | Focus | etc
         Size  = 36,
+        Spin  = true, -- override per-style when set from menu
     },
     KeyOverlay = {
         Enabled     = false,
@@ -991,20 +993,88 @@ end
 
 function F.deleteConfig(name)
     name = F.sanitizeConfigName(name)
-    if name == "default" then
-        F.pushNotification("cannot delete default", 3)
+    if name == "" or name == "_autoload" then
         return false
     end
-    local ok = pcall(function()
-        local path = F.configPath(name)
-        if typeof(delfile) == "function" and typeof(isfile) == "function" and isfile(path) then
-            delfile(path)
+    if typeof(delfile) ~= "function" then
+        print("[Juru][Config] delfile not available")
+        F.pushNotification("delete unsupported on this executor", 3)
+        return false
+    end
+
+    local removed = 0
+    local function tryDel(path)
+        if type(path) ~= "string" or path == "" then return end
+        -- Always try delfile (isfile is unreliable on some executors)
+        local ok1 = pcall(function() delfile(path) end)
+        local stillThere = false
+        pcall(function()
+            if typeof(isfile) == "function" and isfile(path) then
+                stillThere = true
+            end
+        end)
+        if ok1 and not stillThere then
+            removed = removed + 1
+            print("[Juru][Config] deleted", path)
+        elseif ok1 then
+            -- some executors report success but file remains — try again
+            pcall(function() delfile(path) end)
+            pcall(function()
+                if typeof(isfile) == "function" and not isfile(path) then
+                    removed = removed + 1
+                    print("[Juru][Config] deleted (retry)", path)
+                end
+            end)
+        end
+    end
+
+    -- Feature JSON (all known locations)
+    tryDel(F.configPath(name))
+    tryDel("JuruConfigs/" .. name .. ".json")
+    tryDel("JuruConfigs/" .. name .. ".cfg")
+    tryDel(name .. ".json")
+
+    -- Millenium / UI library configs
+    local dir = (library and library.directory) or "milenium"
+    tryDel(dir .. "/configs/" .. name .. ".cfg")
+    tryDel(dir .. "/configs/" .. name .. ".json")
+    tryDel("milenium/configs/" .. name .. ".cfg")
+    tryDel("milenium/configs/" .. name .. ".json")
+
+    -- If this was the autoload target, clear it
+    local al = nil
+    pcall(function() al = F.getAutoloadName and F.getAutoloadName() end)
+    if al and F.sanitizeConfigName(al) == name then
+        pcall(function() delfile("JuruConfigs/_autoload.txt") end)
+        pcall(function() delfile("milenium/autoload.txt") end)
+        pcall(function() delfile(((library and library.directory) or "milenium") .. "/autoload.txt") end)
+        autoloadConfigName = nil
+        print("[Juru][Config] cleared autoload (pointed at deleted config)")
+    end
+
+    if removed > 0 then
+        F.pushNotification("deleted: " .. name, 2)
+        print("[Juru][Config] removed", removed, "file(s) for", name)
+        return true
+    end
+
+    -- Last resort: mark missing even if delfile was no-op (already gone)
+    local exists = false
+    pcall(function()
+        if typeof(isfile) == "function" then
+            if isfile(F.configPath(name)) then exists = true end
+            if isfile("milenium/configs/" .. name .. ".cfg") then exists = true end
         end
     end)
-    if ok then
-        F.pushNotification("deleted config: " .. name, 2)
+    if not exists then
+        F.pushNotification("deleted: " .. name, 2)
+        print("[Juru][Config] already gone:", name)
+        return true
     end
-    return ok
+
+    F.pushNotification("delete failed: " .. name, 3)
+    print("[Juru][Config] delete failed for", name)
+    return false
 end
 
 function F.getCurrentConfigName()
@@ -1493,11 +1563,7 @@ end
 -- Set Spin = true/false on each entry to control rotation.
 -- ============================================================
 local CROSSHAIR_PRESETS = {
-    -- Original purple spinning cross (no Url = default lines)
-    ["Default"] = {
-        Url  = nil,
-        Spin = true,
-    },
+    ["Default"] = { Url = nil, Spin = true },
     ["Hello Kitty"] = {
         Url  = "https://raw.githubusercontent.com/driffiti/Images/main/Hello.png",
         Spin = false,
@@ -1518,6 +1584,7 @@ local CROSSHAIR_PRESETS = {
         Url  = "https://raw.githubusercontent.com/driffiti/Images/main/penis.png",
         Spin = true,
     },
+    ["Dot"] = { Url = nil, Spin = false, DotOnly = true },
 }
 
 local crossImageCache = {} -- url -> resolved Image string (getcustomasset path)
@@ -1658,8 +1725,13 @@ local currentCrossSpin = true
 
 function F.applyCrosshairStyle()
     if not Config.Crosshair then
-        Config.Crosshair = { Style = "Default", Size = 36 }
+        Config.Crosshair = { Enabled = true, Style = "Default", Size = 36, Spin = true }
     end
+    if Config.Crosshair.Enabled == false then
+        if crossHolder then crossHolder.Visible = false end
+        return
+    end
+    if crossHolder then crossHolder.Visible = true end
     local style = Config.Crosshair.Style or "Default"
     local size = tonumber(Config.Crosshair.Size) or 36
     local preset = CROSSHAIR_PRESETS[style] or CROSSHAIR_PRESETS["Default"]
@@ -1668,7 +1740,12 @@ function F.applyCrosshairStyle()
         crossHolder.Size = UDim2.new(0, size, 0, size)
     end
 
-    currentCrossSpin = preset and preset.Spin == true
+    -- Menu spin overrides preset default when explicitly set
+    if Config.Crosshair.Spin ~= nil then
+        currentCrossSpin = Config.Crosshair.Spin == true
+    else
+        currentCrossSpin = preset and preset.Spin == true
+    end
 
     if preset and preset.Url then
         for _, line in ipairs(defaultLines) do
@@ -1786,10 +1863,25 @@ function F.forceCrosshairVisible()
         if dot then dot.Visible = false end
     else
         if crossIcon then crossIcon.Visible = false end
-        for _, line in ipairs(defaultLines) do line.Visible = true end
+        local dotOnly = preset and preset.DotOnly == true
+        for _, line in ipairs(defaultLines) do
+            line.Visible = not dotOnly
+        end
         if dot then dot.Visible = true end
     end
 end
+
+-- Mobile touch tracking for crosshair follow
+F.jConnect(UserInputService.InputBegan, function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        shared._juruTouchAt = tick()
+    end
+end)
+F.jConnect(UserInputService.InputChanged, function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        shared._juruTouchAt = tick()
+    end
+end)
 
 local _lastForceCross = 0
 F.jConnect(RunService.RenderStepped, function(dt)
@@ -1810,9 +1902,30 @@ F.jConnect(RunService.RenderStepped, function(dt)
         end
     end
 
-    local m = UserInputService:GetMouseLocation()
-    if crossHolder then
-        crossHolder.Position = UDim2.new(0, m.X, 0, m.Y)
+    if crossHolder and Config.Crosshair and Config.Crosshair.Enabled ~= false then
+        crossHolder.Visible = true
+        local x, y
+        local mobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+        if mobile then
+            -- center of viewport (IgnoreGuiInset gui) — most reliable on mobile
+            local cam = Workspace.CurrentCamera
+            local vs = cam and cam.ViewportSize or Vector2.new(0, 0)
+            x, y = vs.X * 0.5, vs.Y * 0.5
+            -- if finger is down, follow last touch for aim feedback
+            local ok, locs = pcall(function() return UserInputService:GetMouseLocation() end)
+            if ok and locs and locs.X > 0 and locs.Y > 0 then
+                -- only use touch pos if recently touched
+                if shared._juruTouchAt and tick() - shared._juruTouchAt < 0.4 then
+                    x, y = locs.X, locs.Y
+                end
+            end
+        else
+            local m = UserInputService:GetMouseLocation()
+            x, y = m.X, m.Y
+        end
+        crossHolder.Position = UDim2.new(0, x, 0, y)
+    elseif crossHolder then
+        crossHolder.Visible = false
     end
 
     if crossText then
@@ -7621,31 +7734,8 @@ F.jConnect(RunService.RenderStepped, function()
 
     F.TriggerBot()
 
-    if SpeedEnabled and Config.Speed and Config.Speed.Enabled and tick() >= (charReadyAt or 0) then
-        pcall(function()
-            local c = LocalPlayer.Character
-            if not c or not c.Parent then return end
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            if not hum or hum.Health <= 0 then return end
-            local want = tonumber(Config.Speed.WalkSpeed) or 16
-            local t = math.clamp(want, 1, 500)
-            local before = hum.WalkSpeed
-            hum.WalkSpeed = t
-            -- log ~2x/sec when mismatch (game overwriting us)
-            F._wsLogAt = F._wsLogAt or 0
-            if tick() - F._wsLogAt >= 0.5 then
-                F._wsLogAt = tick()
-                local after = hum.WalkSpeed
-                print(string.format(
-                    "[Juru][Speed] allow=%s active=%s want=%.1f set=%.1f before=%.1f after=%.1f ready=%s",
-                    tostring(Config.Speed.Enabled),
-                    tostring(SpeedEnabled),
-                    want, t, before or -1, after or -1,
-                    tostring(tick() >= (charReadyAt or 0))
-                ))
-            end
-        end)
-    end
+    -- WalkSpeed applied in Stepped loop below (fights game resets)
+
 
     F.updateSoftLock()
     F.updateFOVCircle()
@@ -7663,6 +7753,32 @@ end)
 -- Super jump: works while CFrame speed is on (preserves Y; cooldown gate)
 
 
+
+-- WalkSpeed: every physics step (game often resets to 16 between frames)
+F.jConnect(RunService.Stepped, function()
+    if not JuruAlive then return end
+    if not (SpeedEnabled and Config.Speed and Config.Speed.Enabled == true) then return end
+    if tick() < (charReadyAt or 0) then return end
+    local c = LocalPlayer.Character
+    if not c or not c.Parent then return end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    local t = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
+    if hum.WalkSpeed ~= t then
+        hum.WalkSpeed = t
+    end
+end)
+F.jConnect(RunService.Heartbeat, function()
+    if not JuruAlive then return end
+    if not (SpeedEnabled and Config.Speed and Config.Speed.Enabled == true) then return end
+    if tick() < (charReadyAt or 0) then return end
+    local c = LocalPlayer.Character
+    if not c or not c.Parent then return end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    local t = math.clamp(tonumber(Config.Speed.WalkSpeed) or 16, 1, 500)
+    hum.WalkSpeed = t
+end)
 
 -- Super jump (old method): toggle on keybind, hold key for Y velocity boost.
 local _superJumpUntil = 0
@@ -7699,24 +7815,14 @@ F.jConnect(RunService.Heartbeat, function()
         end)
         local afterY = 0
         pcall(function() afterY = root.AssemblyLinearVelocity.Y end)
-        print(string.format(
-            "[Juru][Jump] allow=%s active=%s power=%.1f grounded=%s cframe=%s yBefore=%.1f yAfter=%.1f JumpPower=%.1f JumpHeight=%.1f",
-            tostring(Config.SuperJump.Enabled),
-            tostring(superJumpActive),
-            power,
-            tostring(grounded),
-            tostring(cframeOn),
-            beforeY, afterY,
-            tonumber(hum.JumpPower) or -1,
-            tonumber(hum.JumpHeight) or -1
-        ))
+        F._jumpBoostLogAt = F._jumpBoostLogAt or 0
+        if tick() - F._jumpBoostLogAt >= 1 then
+            F._jumpBoostLogAt = tick()
+            print(string.format("[Juru][Jump] boost y=%.0f power=%.0f", afterY, power))
+        end
         _superJumpUntil = tick() + (Config.SuperJump.Cooldown or 0.1)
     else
-        F._jumpAirLogAt = F._jumpAirLogAt or 0
-        if tick() - F._jumpAirLogAt >= 1 then
-            F._jumpAirLogAt = tick()
-            print("[Juru][Jump] held but not grounded (state=" .. tostring(hum:GetState()) .. ")")
-        end
+        -- airborne hold: no spam
     end
 end)
 
@@ -7731,15 +7837,16 @@ task.defer(function()
             hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
                 if not JuruAlive then return end
                 F._wsExtLogAt = F._wsExtLogAt or 0
-                if tick() - F._wsExtLogAt < 0.25 then return end
+                if tick() - F._wsExtLogAt < 3 then return end
                 F._wsExtLogAt = tick()
-                print(string.format(
-                    "[Juru][Speed] WalkSpeed CHANGED by something -> %.2f (our active=%s allow=%s want=%s)",
-                    hum.WalkSpeed,
-                    tostring(SpeedEnabled),
-                    tostring(Config.Speed and Config.Speed.Enabled),
-                    tostring(Config.Speed and Config.Speed.WalkSpeed)
-                ))
+                local want = Config.Speed and tonumber(Config.Speed.WalkSpeed)
+                -- only log when game fights us (value not what we want)
+                if SpeedEnabled and Config.Speed and Config.Speed.Enabled and want and math.abs(hum.WalkSpeed - want) > 1 then
+                    print(string.format(
+                        "[Juru][Speed] game reset WS -> %.1f (want %.1f)",
+                        hum.WalkSpeed, want
+                    ))
+                end
             end)
         end)
     end
@@ -8621,11 +8728,8 @@ F.jConnect(UserInputService.InputBegan, function(input, processed)
 
     if keyMatches(Config.Keybinds.Speed) then
         if not Config.Speed then Config.Speed = { WalkSpeed = 16, Enabled = false } end
-        print(string.format("[Juru][Speed] KEY allow=%s activeWas=%s slider=%.1f",
-            tostring(Config.Speed.Enabled), tostring(SpeedEnabled), tonumber(Config.Speed.WalkSpeed) or -1))
         if Config.Speed.Enabled ~= true then
             SpeedEnabled = false
-            print("[Juru][Speed] blocked — turn on Walk Speed (allow) in Misc")
             pcall(function()
                 local c = LocalPlayer.Character
                 local hum = c and c:FindFirstChildOfClass("Humanoid")
@@ -8633,7 +8737,6 @@ F.jConnect(UserInputService.InputBegan, function(input, processed)
             end)
         else
             SpeedEnabled = not SpeedEnabled
-            print("[Juru][Speed] toggled active=" .. tostring(SpeedEnabled))
             if not SpeedEnabled then
                 pcall(function()
                     local c = LocalPlayer.Character
@@ -8648,14 +8751,13 @@ F.jConnect(UserInputService.InputBegan, function(input, processed)
 
     if keyMatches(Config.Keybinds.SuperJump) then
         if not Config.SuperJump then Config.SuperJump = { Power = 50, Enabled = false } end
-        print(string.format("[Juru][Jump] KEY allow=%s activeWas=%s power=%.1f",
-            tostring(Config.SuperJump.Enabled), tostring(superJumpActive), tonumber(Config.SuperJump.Power) or -1))
+        -- debounce: avoid double-toggle from key repeat
+        if tick() - (F._jumpKeyAt or 0) < 0.35 then return end
+        F._jumpKeyAt = tick()
         if Config.SuperJump.Enabled ~= true then
             superJumpActive = false
-            print("[Juru][Jump] blocked — turn on Super Jump (allow) in Misc")
         else
             superJumpActive = not superJumpActive
-            print("[Juru][Jump] toggled active=" .. tostring(superJumpActive))
         end
         pcall(function() if F.refreshKeybindList then F.refreshKeybindList() end end)
     end
@@ -8886,22 +8988,26 @@ function F.buildWatermark()
     local gui = Instance.new("ScreenGui")
     gui.Name = "JuruWatermark"
     gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
+    gui.IgnoreGuiInset = true -- top of full screen (above roblox topbar)
+    gui.DisplayOrder = 999
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Enabled = true
     gui.Parent = parent
     watermarkGui = gui
 
     -- Fixed total width so FPS digits never resize the bar
-    local TOTAL_W, H = 420, 34
+    local TOTAL_W, H = 420, 32
     local BRAND_W = 96
     local INFO_W = TOTAL_W - BRAND_W - 8
 
     local root = Instance.new("Frame")
     root.Name = "Root"
     root.AnchorPoint = Vector2.new(0.5, 0)
-    root.Position = UDim2.new(0.5, 0, 0, 12)
+    -- Very top center of the screen
+    root.Position = UDim2.new(0.5, 0, 0, 4)
     root.Size = UDim2.new(0, TOTAL_W, 0, H)
     root.BackgroundTransparency = 1
+    root.ZIndex = 10
     root.Parent = gui
 
     local layout = Instance.new("UIListLayout")
@@ -9355,11 +9461,18 @@ else
         end)
     end
 
+    local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    local winW, winH = 720, 575
+    if isMobile then
+        local vs = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+        winW = math.clamp(math.floor(vs.X * 0.92), 320, 720)
+        winH = math.clamp(math.floor(vs.Y * 0.72), 360, 575)
+    end
     local window = library:window({
         name = "juru",
         suffix = ".lol",
         gameInfo = "juru.lol · " .. tostring(placeName),
-        size = UDim2.new(0, 720, 0, 575),
+        size = UDim2.new(0, winW, 0, winH),
     })
 
     pcall(function() library:update_theme("accent", Color3.fromRGB(170, 100, 255)) end)
@@ -9411,6 +9524,53 @@ else
             end)
         end
     end)
+
+    -- Mobile: floating button to open/close menu (no physical LeftAlt)
+    if UserInputService.TouchEnabled then
+        task.defer(function()
+            local parent = F.getUiParent and F.getUiParent() or nil
+            if not parent then return end
+            local old = parent:FindFirstChild("JuruMobileMenuBtn")
+            if old then old:Destroy() end
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "JuruMobileMenuBtn"
+            sg.ResetOnSpawn = false
+            sg.IgnoreGuiInset = true
+            sg.DisplayOrder = 200
+            sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            pcall(function() if F.protectGui then F.protectGui(sg) end end)
+            sg.Parent = parent
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(0, 52, 0, 52)
+            btn.Position = UDim2.new(1, -64, 0.5, -26)
+            btn.BackgroundColor3 = Color3.fromRGB(24, 18, 38)
+            btn.Text = "J"
+            btn.TextColor3 = Color3.fromRGB(170, 100, 255)
+            btn.Font = Enum.Font.GothamBold
+            btn.TextSize = 22
+            btn.AutoButtonColor = false
+            btn.BorderSizePixel = 0
+            btn.Parent = sg
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 12)
+            c.Parent = btn
+            local st = Instance.new("UIStroke")
+            st.Color = Color3.fromRGB(170, 100, 255)
+            st.Thickness = 1.2
+            st.Transparency = 0.35
+            st.Parent = btn
+            btn.MouseButton1Click:Connect(function()
+                shared._juruMenuOpen = not shared._juruMenuOpen
+                pcall(function()
+                    if window.toggle_menu then
+                        window.toggle_menu(shared._juruMenuOpen == true)
+                    elseif library.items then
+                        library.items.Enabled = shared._juruMenuOpen == true
+                    end
+                end)
+            end)
+        end)
+    end
 
     ------------------------------------------------------------
     -- COMBAT
@@ -9542,7 +9702,33 @@ else
         fx:toggle({ name = "Hit Marker", default = false, seperator = true, callback = function(v) if not Config.HitMarker then Config.HitMarker = {} end; Config.HitMarker.Enabled = v == true end })
         fx:toggle({ name = "Local Effects", default = false, seperator = true, callback = function(v) if not Config.LocalFx then Config.LocalFx = {} end; Config.LocalFx.Enabled = v == true end })
         fx:toggle({ name = "Hit Sound", default = false, seperator = true, callback = function(v) if not Config.HitSound then Config.HitSound = {} end; Config.HitSound.Enabled = v == true end })
-        fx:dropdown({ name = "Hit Sound", items = { "mc bow", "primordial", "neverlose", "sparkle", "skeet", "break", "rust", "sexy" }, default = "mc bow", multi = false, seperator = false, callback = function(v) if F.setHitSound then F.setHitSound(tostring(v)) end end })
+        fx:dropdown({ name = "Hit Sound", items = { "mc bow", "primordial", "neverlose", "sparkle", "skeet", "break", "rust", "sexy" }, default = "mc bow", multi = false, seperator = true, callback = function(v) if F.setHitSound then F.setHitSound(tostring(v)) end end })
+        fx:toggle({ name = "Custom Crosshair", default = true, seperator = true, callback = function(v)
+            if not Config.Crosshair then Config.Crosshair = {} end
+            Config.Crosshair.Enabled = v == true
+            pcall(function() if F.applyCrosshairStyle then F.applyCrosshairStyle() end end)
+        end })
+        fx:dropdown({
+            name = "Crosshair Style",
+            items = { "Default", "Hello Kitty", "Nazi", "Crosshair", "Focus", "Penis", "Dot" },
+            default = (Config.Crosshair and Config.Crosshair.Style) or "Default",
+            multi = false, seperator = true,
+            callback = function(v)
+                if not Config.Crosshair then Config.Crosshair = {} end
+                Config.Crosshair.Style = tostring(v)
+                pcall(function() if F.applyCrosshairStyle then F.applyCrosshairStyle() end end)
+            end,
+        })
+        fx:slider({ name = "Crosshair Size", min = 12, max = 80, default = tonumber(Config.Crosshair and Config.Crosshair.Size) or 36, seperator = true, callback = function(v)
+            if not Config.Crosshair then Config.Crosshair = {} end
+            Config.Crosshair.Size = v
+            if crossHolder then crossHolder.Size = UDim2.new(0, v, 0, v) end
+        end })
+        fx:toggle({ name = "Crosshair Spin", default = true, seperator = false, callback = function(v)
+            if not Config.Crosshair then Config.Crosshair = {} end
+            Config.Crosshair.Spin = v == true
+            currentCrossSpin = v == true
+        end })
     end
 
     ------------------------------------------------------------
@@ -9607,7 +9793,7 @@ else
             end
             print("[Juru][Speed] ALLOW=", v, "active=", SpeedEnabled, "slider=", Config.Speed.WalkSpeed)
         end })
-        move:slider({ name = "Speed Value", min = 16, max = 500, default = 16, seperator = true, callback = function(v) if not Config.Speed then Config.Speed = {} end; Config.Speed.WalkSpeed = v; print("[Juru][Speed] slider=", v) end })
+        move:slider({ name = "Speed Value", min = 16, max = 500, default = 16, seperator = true, callback = function(v) if not Config.Speed then Config.Speed = {} end; Config.Speed.WalkSpeed = v end })
         move:toggle({ name = "CFrame Speed (allow)", default = false, seperator = true, callback = function(v)
             if not Config.CFrameSpeed then Config.CFrameSpeed = {} end
             Config.CFrameSpeed.Enabled = v == true
@@ -9621,7 +9807,7 @@ else
             if not v then superJumpActive = false end
             print("[Juru][Jump] ALLOW=", v, "active=", superJumpActive, "power=", Config.SuperJump.Power)
         end })
-        move:slider({ name = "Jump Power", min = 50, max = 400, default = 50, seperator = false, callback = function(v) if not Config.SuperJump then Config.SuperJump = {} end; Config.SuperJump.Power = v; print("[Juru][Jump] slider=", v) end })
+        move:slider({ name = "Jump Power", min = 50, max = 400, default = 50, seperator = false, callback = function(v) if not Config.SuperJump then Config.SuperJump = {} end; Config.SuperJump.Power = v end })
         local fly = colR:section({ name = "Fly", default = true, size = 1 })
         fly:toggle({ name = "Fly (allow)", default = false, seperator = true, callback = function(v) if not Config.Fly then Config.Fly = {} end; Config.Fly.Enabled = v == true; if not v then flyEnabled = false end end })
         fly:slider({ name = "Fly Speed", min = 10, max = 200, default = 50, seperator = false, callback = function(v) if not Config.Fly then Config.Fly = {} end; Config.Fly.Speed = v end })
@@ -9637,7 +9823,7 @@ else
         protect:toggle({ name = "Watermark", default = true, seperator = true, callback = function(v)
             if not Config.Watermark then Config.Watermark = {} end
             Config.Watermark.Enabled = v == true
-            if v then pcall(F.buildWatermark) else pcall(function() if F.afRestoreCollisions then F.afRestoreCollisions() end end)
+            if v then pcall(F.buildWatermark) else pcall(function() if F.destroyWatermark then F.destroyWatermark() end end)
     pcall(F.destroyWatermark) end
         end })
         protect:toggle({ name = "Anti Fling", default = false, seperator = true, callback = function(v)
@@ -9704,9 +9890,13 @@ else
                             Config.Keybinds[field] = kn
                             if field == "ChatMacro" then
                                 if not Config.ChatMacro then Config.ChatMacro = { Message = "/getjuru" } end
-                                Config.ChatMacro.Key = kn
-                                pcall(function() if F.saveChatMacro then F.saveChatMacro() end end)
-                                print("[Juru][ChatMacro] keybind set to", kn)
+                                if Config.ChatMacro.Key ~= kn then
+                                    Config.ChatMacro.Key = kn
+                                    pcall(function() if F.saveChatMacro then F.saveChatMacro() end end)
+                                    print("[Juru][ChatMacro] keybind set to", kn)
+                                else
+                                    Config.ChatMacro.Key = kn
+                                end
                             end
                         end
                     end
@@ -9768,11 +9958,7 @@ else
             key = toKeyCode(kbName("ChatMacro", "F6"), "F6"),
             mode = "Toggle", default = true, seperator = true,
             callback = function()
-                task.defer(function()
-                    pcall(F.snapKeybindsFromFlags)
-                    local k = F.getChatMacroKey and F.getChatMacroKey() or "?"
-                    print("[Juru][ChatMacro] menu key now", k)
-                end)
+                task.defer(F.snapKeybindsFromFlags)
             end,
         })
         keys:keybind({
@@ -9831,14 +10017,55 @@ else
             local function add(raw)
                 local n = tostring(raw or ""):gsub("\\", "/"):match("([^/]+)$") or tostring(raw)
                 n = n:gsub("%.cfg$", ""):gsub("%.json$", "")
-                if n ~= "" and n:sub(1, 1) ~= "_" and not seen[n] then seen[n] = true; table.insert(names, n) end
+                n = n:gsub("^%s+", ""):gsub("%s+$", "")
+                if n == "" or n:sub(1, 1) == "_" or n == "autoload" then return end
+                if seen[n] then return end
+                -- Prefer names that still have at least one file (when isfile works)
+                local alive = true
+                if typeof(isfile) == "function" then
+                    local any = false
+                    local noneChecked = true
+                    local paths = {
+                        "JuruConfigs/" .. n .. ".json",
+                        dir .. "/configs/" .. n .. ".cfg",
+                        "milenium/configs/" .. n .. ".cfg",
+                    }
+                    for _, p in ipairs(paths) do
+                        local ok, exists = pcall(isfile, p)
+                        if ok then
+                            noneChecked = false
+                            if exists then
+                                any = true
+                                break
+                            end
+                        end
+                    end
+                    if not noneChecked then alive = any end
+                end
+                if not alive then return end
+                seen[n] = true
+                table.insert(names, n)
             end
-            pcall(function() if listfiles then for _, f in ipairs(listfiles(dir .. "/configs") or {}) do add(f) end end end)
-            pcall(function() if listfiles then for _, f in ipairs(listfiles("JuruConfigs") or {}) do add(f) end end end)
+            pcall(function()
+                if listfiles then
+                    for _, f in ipairs(listfiles(dir .. "/configs") or {}) do add(f) end
+                end
+            end)
+            pcall(function()
+                if listfiles then
+                    for _, f in ipairs(listfiles("JuruConfigs") or {}) do add(f) end
+                end
+            end)
+            pcall(function()
+                if listfiles then
+                    for _, f in ipairs(listfiles("milenium/configs") or {}) do add(f) end
+                end
+            end)
             table.sort(names)
             if #names == 0 then table.insert(names, "default") end
             return names
         end
+
         local cfgList
         local function refresh()
             local n = listNames()
@@ -9917,9 +10144,28 @@ else
         end })
         settings:button({ name = "Delete", callback = function()
             local n = resolveName(false)
-            pcall(function() delfile(dir .. "/configs/" .. n .. ".cfg") end)
-            pcall(function() if F.deleteConfig then F.deleteConfig(n) end end)
-            refresh()
+            n = tostring(n or ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if n == "" then
+                print("[Juru][Config] delete: no name selected")
+                return
+            end
+            print("[Juru][Config] delete requested:", n)
+            local ok = false
+            pcall(function()
+                if F.deleteConfig then ok = F.deleteConfig(n) == true end
+            end)
+            -- Extra UI cfg paths (in case library.directory differs)
+            pcall(function() if delfile then delfile(dir .. "/configs/" .. n .. ".cfg") end end)
+            pcall(function() if delfile then delfile(dir .. "/configs/" .. n .. ".json") end end)
+            pcall(function() if delfile then delfile("milenium/configs/" .. n .. ".cfg") end end)
+            pcall(function() if delfile then delfile("JuruConfigs/" .. n .. ".json") end end)
+            if selectedName == n then selectedName = "default" end
+            task.defer(function()
+                task.wait(0.05)
+                local names = refresh()
+                print("[Juru][Config] list after delete:", table.concat(names or {}, ", "))
+            end)
+            F.log("delete", n, ok)
         end })
         settings:button({ name = "Set Autoload", callback = function()
             local n = resolveName(false)

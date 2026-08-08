@@ -10,7 +10,12 @@ local UIS = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 
 local function __juru_req()
-    return (syn and syn.request) or http_request or request or (fluxus and fluxus.request)
+    return (syn and syn.request)
+        or (Delta and Delta.request)
+        or (Electron and Electron.request)
+        or http_request
+        or request
+        or (fluxus and fluxus.request)
 end
 
 local function __juru_identify_executor()
@@ -19,9 +24,16 @@ local function __juru_identify_executor()
         if identifyexecutor then
             local n, v = identifyexecutor()
             name = n or name; version = v or version
+        elseif getexecutorname then
+            name = getexecutorname() or name
         elseif syn then name = "Synapse X"
         elseif KRNL_LOADED then name = "Krnl"
         elseif Fluxus then name = "Fluxus"
+        elseif Delta then name = "Delta"
+        elseif Electron then name = "Electron"
+        elseif is_sirhurt_closure then name = "SirHurt"
+        elseif Comet then name = "Comet"
+        elseif OXYGEN_U then name = "Oxygen U"
         end
     end)
     return name, version
@@ -32,6 +44,8 @@ local function __juru_hwid()
         if gethwid then return gethwid() end
         if syn and syn.get_hwid then return syn.get_hwid() end
         if get_hwid then return get_hwid() end
+        if getdeviceid then return getdeviceid() end
+        if Delta and Delta.fingerprint then return Delta.fingerprint() end
         local r = game:GetService("RbxAnalyticsService"):GetClientId()
         if r and r ~= "" then return r end
     end)
@@ -44,8 +58,7 @@ local function __juru_alert(msg)
     end)
 end
 
-local __juru_exec_name = select(1, __juru_identify_executor())
-local __juru_exec_version = select(2, __juru_identify_executor())
+local __juru_exec_name, __juru_exec_version = __juru_identify_executor()
 local __juru_hwid_val = __juru_hwid()
 local __juru_lp = Players.LocalPlayer
 local __juru_http = __juru_req()
@@ -114,10 +127,7 @@ end
 
 local function stroke(col, t, a, p)
     local s = Instance.new("UIStroke")
-    s.Color = col
-    s.Thickness = t or 1
-    s.Transparency = a or 0
-    s.Parent = p
+    s.Color = col; s.Thickness = t or 1; s.Transparency = a or 0; s.Parent = p
     return s
 end
 
@@ -146,7 +156,6 @@ local function __juru_show_panel()
         pcall(function() sg.Parent = __juru_lp.PlayerGui end)
     end
 
-    -- dim
     local overlay = Instance.new("Frame")
     overlay.Size = US(1, 1)
     overlay.BackgroundColor3 = C(0, 0, 0)
@@ -155,7 +164,6 @@ local function __juru_show_panel()
     overlay.ZIndex = 1
     overlay.Parent = sg
 
-    -- panel
     local panel = Instance.new("Frame")
     panel.Size = UO(380, 240)
     panel.Position = US(0.5, 0.52)
@@ -171,7 +179,6 @@ local function __juru_show_panel()
     tween(overlay, 0.2, { BackgroundTransparency = 0.5 })
     tween(panel, 0.22, { BackgroundTransparency = 0, Position = US(0.5, 0.5) })
 
-    -- title
     local title = Instance.new("TextLabel")
     title.BackgroundTransparency = 1
     title.Position = UO(20, 18)
@@ -184,7 +191,6 @@ local function __juru_show_panel()
     title.ZIndex = 3
     title.Parent = panel
 
-    -- close
     local close = Instance.new("TextButton")
     close.Size = UO(28, 28)
     close.Position = U2(1, -40, 0, 16)
@@ -198,7 +204,6 @@ local function __juru_show_panel()
     close.ZIndex = 4
     close.Parent = panel
     corner(8, close)
-
     close.MouseEnter:Connect(function()
         tween(close, 0.1, { BackgroundColor3 = C(35, 25, 50), TextColor3 = TEXT })
     end)
@@ -206,7 +211,6 @@ local function __juru_show_panel()
         tween(close, 0.1, { BackgroundColor3 = BG2, TextColor3 = MUTED })
     end)
 
-    -- subtitle
     local sub = Instance.new("TextLabel")
     sub.BackgroundTransparency = 1
     sub.Position = UO(20, 44)
@@ -219,7 +223,6 @@ local function __juru_show_panel()
     sub.ZIndex = 3
     sub.Parent = panel
 
-    -- input
     local inputBg = Instance.new("Frame")
     inputBg.Size = U2(1, -40, 0, 42)
     inputBg.Position = UO(20, 72)
@@ -252,7 +255,6 @@ local function __juru_show_panel()
         tween(inStroke, 0.12, { Color = C(55, 40, 85) })
     end)
 
-    -- status
     local status = Instance.new("TextLabel")
     status.BackgroundTransparency = 1
     status.Position = UO(20, 120)
@@ -265,7 +267,6 @@ local function __juru_show_panel()
     status.ZIndex = 3
     status.Parent = panel
 
-    -- get key
     local gk = Instance.new("TextButton")
     gk.Size = UO(160, 40)
     gk.Position = UO(20, 148)
@@ -280,7 +281,6 @@ local function __juru_show_panel()
     gk.Parent = panel
     corner(8, gk)
     stroke(C(55, 40, 85), 1, 0, gk)
-
     gk.MouseEnter:Connect(function()
         tween(gk, 0.1, { TextColor3 = TEXT, BackgroundColor3 = C(28, 22, 42) })
     end)
@@ -288,7 +288,6 @@ local function __juru_show_panel()
         tween(gk, 0.1, { TextColor3 = MUTED, BackgroundColor3 = BG2 })
     end)
 
-    -- execute
     local ex = Instance.new("TextButton")
     ex.Size = UO(170, 40)
     ex.Position = UO(190, 148)
@@ -302,7 +301,6 @@ local function __juru_show_panel()
     ex.ZIndex = 4
     ex.Parent = panel
     corner(8, ex)
-
     ex.MouseEnter:Connect(function()
         if ex.Active then tween(ex, 0.1, { BackgroundColor3 = C(185, 120, 255) }) end
     end)
@@ -310,7 +308,6 @@ local function __juru_show_panel()
         if ex.Active then tween(ex, 0.1, { BackgroundColor3 = PURPLE }) end
     end)
 
-    -- footer
     local foot = Instance.new("TextLabel")
     foot.BackgroundTransparency = 1
     foot.Position = UO(0, 204)
@@ -322,7 +319,7 @@ local function __juru_show_panel()
     foot.ZIndex = 3
     foot.Parent = panel
 
-    -- drag
+    -- drag zone (top bar area)
     local dragging, dragStart, startPos, dragInput
     local dragZone = Instance.new("Frame")
     dragZone.BackgroundTransparency = 1
@@ -409,16 +406,30 @@ local function __juru_show_panel()
     end)
 end
 
--- entry
-local preset = (getgenv and getgenv().SCRIPT_KEY) or ""
+-- ── Entry point ──────────────────────────────────────────────────────────────
+-- Robustly read SCRIPT_KEY from wherever the executor may have stored it.
+local preset = ""
+pcall(function()
+    -- getgenv() covers variables set at the global executor scope
+    if getgenv then preset = getgenv().SCRIPT_KEY or "" end
+end)
+if preset == "" then
+    -- Fallback: direct global reference works when the key is set in the
+    -- same script that calls the loadstring (e.g. SCRIPT_KEY = "..." above it)
+    pcall(function() if SCRIPT_KEY and SCRIPT_KEY ~= "" then preset = SCRIPT_KEY end end)
+end
+
 local first = __juru_unlock(preset, __juru_nonce)
+
 if first and first.valid then
+    -- Key was pre-set and valid, or key not required. Skip UI.
     __juru_run(first.script)
 elseif first and (
     first.reason == "No key provided." or
     first.reason == "Invalid key." or
     (first.reason and (first.reason:find("expired") or first.reason:find("revoked")))
 ) then
+    -- Key required or wrong — show the in-game panel.
     __juru_show_panel()
 elseif not first then
     __juru_alert("Couldn't reach juru.lol. Try again shortly.")

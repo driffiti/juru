@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 
-  const nonceValid = await verifyNonce(body.nonce, ip);
+  const nonceValid = await verifyNonce(body.nonce);
   if (!nonceValid) {
     return NextResponse.json({ valid: false, reason: "Loader has expired — re-run the loadstring." });
   }
